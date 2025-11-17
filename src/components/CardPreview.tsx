@@ -1,17 +1,74 @@
 // src/components/CardPreview.tsx
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { MainDeckCard, CreatureCard, EvolutionCard, BoardCreature, PlayerState } from "../game/types";
 import { cardRegistry } from "../game/cardRegistry";
 import "../CardPreview.css";
 
 interface CardPreviewProps {
   card: MainDeckCard | EvolutionCard | BoardCreature | null;
-  playerState?: PlayerState; // For checking buffs/relics
-  slotIndex?: number; // If it's a board creature
+  playerState?: PlayerState;
+  slotIndex?: number;
 }
 
+// Keyword explanations
+const KEYWORD_TOOLTIPS: Record<string, string> = {
+  GUARD: "Enemies must attack this creature first while it lives.",
+  ARMOR: "Reduces all incoming damage by X.",
+  REGEN: "Heals X HP at the start of your turn.",
+  SPELL_SHIELD: "The first enemy spell that targets this creature is negated.",
+  FIRST_STRIKE: "Deals combat damage before the opposing creature.",
+  DOUBLE_STRIKE: "Deals combat damage twice (first strike timing + regular timing).",
+  PIERCING: "Excess damage dealt to creatures carries over to the opponent.",
+  LIFETAP: "When this creature hits the enemy leader, heal your leader 1 HP.",
+  SURGE: "At the start of your turn, this creature gets +X ATK until end of turn.",
+  CATALYST: "Triggers an effect when you cast your first spell each turn.",
+  AWAKEN: "Gains bonus stats while your life is lower than your opponent's.",
+  UN_TARGETABLE: "Cannot be targeted by enemy spells.",
+  RESISTANT: "Takes X less damage from spells only.",
+  REFLECT: "The first enemy spell targeting this creature targets the opponent instead.",
+  EMPOWER: "Counts as +1 HP toward sacrifice summoning.",
+  VIGILANT: "This creature can attack twice per turn.",
+  SWIFT: "Does not have summoning sickness (can attack immediately).",
+  DEATH: "Triggers an effect when this creature dies.",
+};
+
 export const CardPreview: React.FC<CardPreviewProps> = ({ card, playerState, slotIndex }) => {
+  const [hoveredKeyword, setHoveredKeyword] = useState<string | null>(null);
+  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
+  const [tooltipSize, setTooltipSize] = useState({ width: 0, height: 0 });
+
+  // Adjust tooltip position to keep it on screen
+  useEffect(() => {
+    if (hoveredKeyword && tooltipSize.width > 0) {
+      const padding = 10;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+
+      let adjustedX = tooltipPosition.x;
+      let adjustedY = tooltipPosition.y - 10;
+
+      // Check right edge
+      if (adjustedX + tooltipSize.width / 2 > viewportWidth - padding) {
+        adjustedX = viewportWidth - tooltipSize.width / 2 - padding;
+      }
+
+      // Check left edge
+      if (adjustedX - tooltipSize.width / 2 < padding) {
+        adjustedX = tooltipSize.width / 2 + padding;
+      }
+
+      // Check top edge
+      if (adjustedY - tooltipSize.height < padding) {
+        adjustedY = tooltipPosition.y + 30; // Position below keyword instead
+      }
+
+      if (adjustedX !== tooltipPosition.x || adjustedY !== tooltipPosition.y) {
+        setTooltipPosition({ x: adjustedX, y: adjustedY });
+      }
+    }
+  }, [hoveredKeyword, tooltipSize]);
+
   if (!card) {
     return (
       <div className="card-preview-panel">
@@ -42,6 +99,99 @@ export const CardPreview: React.FC<CardPreviewProps> = ({ card, playerState, slo
     displayAtk = (displayAtk || 0) + tempAtkBuff;
     relicCount = playerState.relics.filter(r => r.slotIndex === slotIndex).length;
   }
+
+  // Get granted keywords from relics
+  const grantedKeywords: Array<{ keyword: string; source: string; value?: number }> = [];
+  
+  if (boardCreature && playerState && slotIndex !== undefined) {
+    playerState.relics
+      .filter(r => r.slotIndex === slotIndex)
+      .forEach(relicData => {
+        const relicKeywords = cardRegistry.getKeywords(relicData.relic.name);
+        
+        relicKeywords.forEach(kw => {
+          grantedKeywords.push({
+            keyword: kw.keyword,
+            source: relicData.relic.name,
+            value: kw.armor || kw.regen || kw.surge || undefined
+          });
+        });
+      });
+  }
+
+  // Render card text with keyword highlighting
+  const renderTextWithKeywords = (text: string) => {
+    const parts: Array<{ text: string; isKeyword: boolean; keyword?: string }> = [];
+    let lastIndex = 0;
+
+    // Find all keyword matches in the text
+    const matches: Array<{ index: number; length: number; keyword: string; match: string }> = [];
+    
+    for (const keyword of Object.keys(KEYWORD_TOOLTIPS)) {
+      const pattern = keyword.replace('_', '[\\s_]');
+      // Match keyword with optional value (e.g., "Armor 2", "Death:")
+      const regex = new RegExp(`\\b${pattern}(\\s*\\d+|\\s*:)?\\b`, 'gi');
+      let match;
+      
+      while ((match = regex.exec(text)) !== null) {
+        matches.push({
+          index: match.index,
+          length: match[0].length,
+          keyword: keyword,
+          match: match[0]
+        });
+      }
+    }
+
+    // Sort matches by index
+    matches.sort((a, b) => a.index - b.index);
+
+    // Build parts array
+    matches.forEach(match => {
+      if (match.index > lastIndex) {
+        parts.push({
+          text: text.substring(lastIndex, match.index),
+          isKeyword: false
+        });
+      }
+      parts.push({
+        text: match.match,
+        isKeyword: true,
+        keyword: match.keyword
+      });
+      lastIndex = match.index + match.length;
+    });
+
+    if (lastIndex < text.length) {
+      parts.push({
+        text: text.substring(lastIndex),
+        isKeyword: false
+      });
+    }
+
+    return (
+      <>
+        {parts.map((part, i) => 
+          part.isKeyword ? (
+            <span
+              key={i}
+              className="keyword-highlight"
+              onMouseEnter={(e) => {
+                setHoveredKeyword(part.keyword!);
+                const rect = e.currentTarget.getBoundingClientRect();
+                setTooltipPosition({ x: rect.left + rect.width / 2, y: rect.top });
+              }}
+              onMouseLeave={() => setHoveredKeyword(null)}
+            >
+              {part.text}
+            </span>
+          ) : (
+            <span key={i}>{part.text}</span>
+          )
+        )}
+      </>
+    );
+  };
 
   return (
     <div className="card-preview-panel">
@@ -90,23 +240,6 @@ export const CardPreview: React.FC<CardPreviewProps> = ({ card, playerState, slo
           </div>
         )}
 
-        {/* Keywords */}
-        {keywords.length > 0 && (
-          <div className="card-preview-keywords">
-            <h4>Keywords:</h4>
-            <div className="keyword-list">
-              {keywords.map((kw, idx) => (
-                <span key={idx} className="keyword-badge">
-                  {kw.keyword}
-                  {kw.armor && ` ${kw.armor}`}
-                  {kw.regen && ` ${kw.regen}`}
-                  {kw.surge && ` ${kw.surge}`}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Active Effects/Buffs */}
         {boardCreature && (
           <div className="card-preview-active-effects">
@@ -137,14 +270,35 @@ export const CardPreview: React.FC<CardPreviewProps> = ({ card, playerState, slo
                   {relicCount} Relic{relicCount > 1 ? "s" : ""} Equipped
                 </div>
               )}
+              {(boardCreature as any).tempAtkBuff > 0 && (
+                <div className="effect-item temp-buff">
+                  +{(boardCreature as any).tempAtkBuff} ATK (temporary)
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* Card Text */}
+        {/* Granted Effects from Relics */}
+        {grantedKeywords.length > 0 && (
+          <div className="card-preview-granted-effects">
+            <h4>Granted by Relics:</h4>
+            <div className="granted-effect-list">
+              {grantedKeywords.map((granted, idx) => (
+                <div key={idx} className="granted-effect-item">
+                  🎴 {granted.keyword}
+                  {granted.value && ` ${granted.value}`}
+                  <span className="granted-source"> (from {granted.source})</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Card Text with keyword highlighting */}
         <div className="card-preview-text">
           <h4>Effect:</h4>
-          <p>{actualCard.text}</p>
+          <p>{renderTextWithKeywords(actualCard.text)}</p>
         </div>
 
         {/* Effects Detail (optional, for debugging) */}
@@ -165,6 +319,30 @@ export const CardPreview: React.FC<CardPreviewProps> = ({ card, playerState, slo
           </div>
         )}
       </div>
+
+      {/* Keyword Tooltip */}
+      {hoveredKeyword && (
+        <div 
+          className="keyword-tooltip"
+          ref={(el) => {
+            if (el) {
+              const rect = el.getBoundingClientRect();
+              if (rect.width !== tooltipSize.width || rect.height !== tooltipSize.height) {
+                setTooltipSize({ width: rect.width, height: rect.height });
+              }
+            }
+          }}
+          style={{
+            position: 'fixed',
+            left: `${tooltipPosition.x}px`,
+            top: `${tooltipPosition.y}px`,
+            transform: 'translate(-50%, -100%)',
+          }}
+        >
+          <div className="keyword-tooltip-title">{hoveredKeyword.replace('_', ' ')}</div>
+          <div className="keyword-tooltip-text">{KEYWORD_TOOLTIPS[hoveredKeyword]}</div>
+        </div>
+      )}
     </div>
   );
 };

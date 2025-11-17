@@ -69,7 +69,7 @@ const GameView: React.FC = () => {
   const [pendingSacSummon, setPendingSacSummon] = useState<PendingSacrificeSummon | null>(null);
   const [selectedSacSlots, setSelectedSacSlots] = useState<number[]>([]);
 
-  // Preview state
+  // Preview state - now persists
   const [previewCard, setPreviewCard] = useState<any>(null);
   const [previewPlayerState, setPreviewPlayerState] = useState<PlayerState | undefined>(undefined);
   const [previewSlotIndex, setPreviewSlotIndex] = useState<number | undefined>(undefined);
@@ -78,6 +78,13 @@ const GameView: React.FC = () => {
   const enemyIndex = activeIndex === 0 ? 1 : 0;
   const active = state.players[activeIndex];
   const enemy = state.players[enemyIndex];
+
+  // Updated hover handlers that set but don't clear
+  const handleCardHover = (card: any, playerState?: PlayerState, slotIndex?: number) => {
+    setPreviewCard(card);
+    setPreviewPlayerState(playerState);
+    setPreviewSlotIndex(slotIndex);
+  };
 
   // -------- Spell casting --------
   function startCastingSpell(cardId: string) {
@@ -295,12 +302,9 @@ const GameView: React.FC = () => {
                 slotIndex: sIdx,
               })
             }
-            onMouseEnterCreature={(bc, player, slotIndex) => {
-              setPreviewCard(bc);
-              setPreviewPlayerState(player);
-              setPreviewSlotIndex(slotIndex);
-            }}
-            onMouseLeaveCreature={() => setPreviewCard(null)}
+            onMouseEnterCreature={(bc, player, slotIndex) => 
+              handleCardHover(bc, player, slotIndex)
+            }
           />
 
           {/* Middle divider */}
@@ -331,12 +335,9 @@ const GameView: React.FC = () => {
                 ? handleAttack
                 : undefined
             }
-            onMouseEnterCreature={(bc, player, slotIndex) => {
-              setPreviewCard(bc);
-              setPreviewPlayerState(player);
-              setPreviewSlotIndex(slotIndex);
-            }}
-            onMouseLeaveCreature={() => setPreviewCard(null)}
+            onMouseEnterCreature={(bc, player, slotIndex) => 
+              handleCardHover(bc, player, slotIndex)
+            }
           />
 
           {/* Active HUD */}
@@ -379,12 +380,7 @@ const GameView: React.FC = () => {
                   total={active.hand.length}
                   isDiscardMode={isDiscardMode}
                   onDiscard={handleChooseDiscard}
-                  onMouseEnter={() => {
-                    setPreviewCard(card);
-                    setPreviewPlayerState(undefined);
-                    setPreviewSlotIndex(undefined);
-                  }}
-                  onMouseLeave={() => setPreviewCard(null)}
+                  onMouseEnter={() => handleCardHover(card)}
                 />
               ))}
             </div>
@@ -403,12 +399,7 @@ const GameView: React.FC = () => {
                   onDropIn={(slotIndex, overwrite) =>
                     handleDropInEvo(evo, slotIndex, overwrite)
                   }
-                  onMouseEnter={() => {
-                    setPreviewCard(evo);
-                    setPreviewPlayerState(undefined);
-                    setPreviewSlotIndex(undefined);
-                  }}
-                  onMouseLeave={() => setPreviewCard(null)}
+                  onMouseEnter={() => handleCardHover(evo)}
                 />
               ))}
             </div>
@@ -509,7 +500,6 @@ interface BoardRowProps {
   onClickCreature?: (playerIndex: number, slotIndex: number) => void;
   onAttachRelic?: (slotIndex: number) => void;
   onMouseEnterCreature?: (bc: BoardCreature, player: PlayerState, slotIndex: number) => void;
-  onMouseLeaveCreature?: () => void;
 }
 
 const BoardRow: React.FC<BoardRowProps> = ({
@@ -523,7 +513,6 @@ const BoardRow: React.FC<BoardRowProps> = ({
   onClickCreature,
   onAttachRelic,
   onMouseEnterCreature,
-  onMouseLeaveCreature,
 }) => {
   const player = state.players[playerIndex];
 
@@ -555,7 +544,6 @@ const BoardRow: React.FC<BoardRowProps> = ({
                     ? () => onMouseEnterCreature(bc, player, idx)
                     : undefined
                 }
-                onMouseLeave={onMouseLeaveCreature}
               />
             ) : (
               <div className="board-slot-empty">Empty</div>
@@ -579,7 +567,6 @@ interface BoardCreatureViewProps {
   onClick?: () => void;
   onAttachRelic?: (slotIndex: number) => void;
   onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
 }
 
 const BoardCreatureView: React.FC<BoardCreatureViewProps> = ({
@@ -594,7 +581,6 @@ const BoardCreatureView: React.FC<BoardCreatureViewProps> = ({
   onClick,
   onAttachRelic,
   onMouseEnter,
-  onMouseLeave,
 }) => {
   const card = bc.card as CreatureCard | EvolutionCard;
 
@@ -611,7 +597,6 @@ const BoardCreatureView: React.FC<BoardCreatureViewProps> = ({
       }`}
       onClick={onClick}
       onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
     >
       {/* Card Image */}
       {card.imagePath ? (
@@ -688,7 +673,6 @@ interface HandCardProps {
   isDiscardMode?: boolean;
   onDiscard?: (cardId: string) => void;
   onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
 }
 
 const HandCard: React.FC<HandCardProps> = ({
@@ -704,7 +688,6 @@ const HandCard: React.FC<HandCardProps> = ({
   isDiscardMode,
   onDiscard,
   onMouseEnter,
-  onMouseLeave,
 }) => {
   const angleSpread = Math.min(15, 40 / Math.max(total, 1));
   const centerIndex = (total - 1) / 2;
@@ -731,7 +714,6 @@ const HandCard: React.FC<HandCardProps> = ({
       }}
       onClick={isDiscardMode ? handleClickDiscard : undefined}
       onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
     >
       {/* Card Image */}
       {card.imagePath ? (
@@ -799,7 +781,6 @@ interface EvolutionCardViewProps {
   onTransform: (slotIndex: number) => void;
   onDropIn: (slotIndex: number, overwriteExisting: boolean) => void;
   onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
 }
 
 const EvolutionCardView: React.FC<EvolutionCardViewProps> = ({
@@ -808,7 +789,6 @@ const EvolutionCardView: React.FC<EvolutionCardViewProps> = ({
   onTransform,
   onDropIn,
   onMouseEnter,
-  onMouseLeave,
 }) => {
   const isTransform = evo.evoType === "TRANSFORM";
 
@@ -816,7 +796,6 @@ const EvolutionCardView: React.FC<EvolutionCardViewProps> = ({
     <div 
       className="evo-card"
       onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
     >
       {/* Card Image */}
       {evo.imagePath ? (

@@ -132,18 +132,19 @@ export const KEYWORD_DEFINITIONS: KeywordDefinition[] = [
   notes:
     "Replaces the former Last Breath keyword. Death triggers on sacrifice for Rank-up summoning.",
 },
-  {
-    keyword: "Surge",
-    label: "Surge",
-    timing: "triggered",
-    short:
-      "When this creature enters the field, it gets +1 ATK until end of turn (unless otherwise stated).",
-    detailed:
-      "By default in this ruleset, Surge gives the creature a temporary +1 ATK buff for the current turn " +
-      "when it enters the board. Some future cards may specify different Surge values or durations, " +
-      "in which case the card text takes precedence.",
-    notes: "Implemented via tempAtkBuff in the engine.",
-  },
+{
+  keyword: "Surge",
+  label: "Surge",
+  timing: "triggered",
+  short:
+    "This creature gets +X ATK at the start of your turn until end of turn.",
+  detailed:
+    "At the start of your turn, this creature gains +X ATK as a temporary buff that lasts until " +
+    "the end of your turn. This bonus is applied every turn, not just when the creature enters play. " +
+    "Since creatures have summoning sickness when first played, Surge provides ongoing value. " +
+    "Some cards may specify different Surge values (e.g., 'Surge +2').",
+  notes: "Applied as tempAtkBuff at start of turn, removed at end of turn.",
+},
   {
     keyword: "Catalyst",
     label: "Catalyst",

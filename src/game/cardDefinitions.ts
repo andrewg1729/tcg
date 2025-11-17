@@ -62,7 +62,7 @@ export const waterCardDefinitions: CardDefinition[] = [
     rank: 1,
     atk: 2,
     hp: 2,
-    text: "Surge. When summoned, this gets +1 ATK this turn.",
+    text: "Surge.",
     imagePath: "/cards/water/Grumpstar.png",
     keywords: [{ keyword: "SURGE", surge: 1 }],
   },
@@ -236,7 +236,7 @@ export const waterCardDefinitions: CardDefinition[] = [
     id: "W-S-004",
     name: "Swell Surge",
     kind: "SLOW_SPELL",
-    text: "Your creatures get +1 ATK this turn.",
+    text: "Your creatures get +1 ATK until the end of this turn.",
     imagePath: "/cards/water/Swell Surge.png",
     effects: [
       {
@@ -483,7 +483,7 @@ export const fireCardDefinitions: CardDefinition[] = [
     rank: 1,
     atk: 2,
     hp: 1,
-    text: "Surge. When summoned, this gets +1 ATK this turn.",
+    text: "Surge.",
     imagePath: "/cards/fire/Coalimp.png",
     keywords: [{ keyword: "SURGE", surge: 1 }],
   },
@@ -662,7 +662,7 @@ export const fireCardDefinitions: CardDefinition[] = [
     id: "F-S-002",
     name: "Blazing Empowerment",
     kind: "FAST_SPELL",
-    text: "Give a creature +2 ATK this turn.",
+    text: "Give a creature +2 ATK until the end of this turn.",
     imagePath: "/cards/fire/Blazing Empowerment.png",
     effects: [
       {
@@ -693,7 +693,7 @@ export const fireCardDefinitions: CardDefinition[] = [
     id: "F-S-004",
     name: "Firecall Rally",
     kind: "SLOW_SPELL",
-    text: "Your creatures get +1 ATK this turn.",
+    text: "Your creatures get +1 ATK until the end of this turn.",
     imagePath: "/cards/fire/Firecall Rally.png",
     effects: [
       {

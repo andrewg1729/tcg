@@ -146,11 +146,14 @@ function getEffectiveAtk(state: GameState, playerIndex: number, slotIndex: numbe
   const baseAtk = (bc.card as any).atk || 0;
   const name = bc.card.name;
 
-  const surgeBonus = 0; // Surge is applied as tempAtkBuff on summon
   const relicBonus = relicAtkBonus(player, slotIndex);
   const tempBuff = (bc as any).tempAtkBuff || 0;
 
   const awakenBonus = hasAwaken(name) && player.life < state.players[1 - playerIndex].life ? 1 : 0;
+  
+  // Surge: +X ATK on owner's turn only
+  const surgeValue = getKeywordValue(name, "SURGE");
+  const surgeBonus = (state.activePlayerIndex === playerIndex && surgeValue > 0) ? surgeValue : 0;
 
   return baseAtk + relicBonus + tempBuff + surgeBonus + awakenBonus;
 }
@@ -258,7 +261,7 @@ function startTurn(gs: GameState): void {
   drawCard(current);
   gs.log.push(`Turn ${gs.turnNumber}: ${current.name} draws a card.`);
 
-  // Reset summoning sickness, attacks, apply Regen, decrement freeze and locations
+  // Reset summoning sickness, attacks, apply Regen and Surge, decrement freeze and locations
   current.board.forEach((bc, idx) => {
     if (!bc) return;
     ensureRuntimeFields(bc);
@@ -273,6 +276,13 @@ function startTurn(gs: GameState): void {
         (bc.card as any).hp + relicHpBonus(current, idx)
       );
       gs.log.push(`${bc.card.name} regenerates ${regen} HP.`);
+    }
+
+    // Surge - apply temporary ATK buff
+    const surgeValue = getKeywordValue(bc.card.name, "SURGE");
+    if (surgeValue > 0) {
+      (bc as any).tempAtkBuff = ((bc as any).tempAtkBuff || 0) + surgeValue;
+      gs.log.push(`${bc.card.name} gains Surge +${surgeValue} ATK this turn.`);
     }
 
     // Frozen turns
@@ -314,6 +324,17 @@ export function endPhase(state: GameState): GameState {
   } else if (p === "ATTACK") {
     gs.phase = "END";
   } else if (p === "END") {
+    // Remove Surge buffs at end of turn
+    const current = gs.players[gs.activePlayerIndex];
+    current.board.forEach((bc) => {
+      if (!bc) return;
+      ensureRuntimeFields(bc);
+      const surgeValue = getKeywordValue(bc.card.name, "SURGE");
+      if (surgeValue > 0) {
+        (bc as any).tempAtkBuff = Math.max(0, ((bc as any).tempAtkBuff || 0) - surgeValue);
+      }
+    });
+
     // Turn passes to other player
     gs.turnNumber += 1;
     gs.activePlayerIndex = gs.activePlayerIndex === 0 ? 1 : 0;
@@ -396,17 +417,24 @@ function performSummonWithSacrifice(
 
   const sacrificedNames: string[] = [];
 
-  for (const { bc, idx } of candidates) {
-    if (!bc || remaining <= 0) break;
-    remaining -= bc.currentHp;
-    sacrificedNames.push(bc.card.name);
-    
-    // Trigger death effects
-    triggerDeathEffects(gs, playerIndex, idx);
-    
-    player.graveyard.push(bc.card);
-    player.board[idx] = null;
-  }
+for (const { bc, idx } of candidates) {
+  if (!bc || remaining <= 0) break;
+  remaining -= bc.currentHp;
+  sacrificedNames.push(bc.card.name);
+  
+  // Trigger death effects
+  triggerDeathEffects(gs, playerIndex, idx);
+  
+  // Send relics to graveyard
+  const attachedRelics = player.relics.filter(r => r.slotIndex === idx);
+  attachedRelics.forEach(relicData => {
+    player.graveyard.push(relicData.relic);
+  });
+  player.relics = player.relics.filter(r => r.slotIndex !== idx);
+  
+  player.graveyard.push(bc.card);
+  player.board[idx] = null;
+}
 
   if (remaining > 0) {
     return `Not enough HP to summon ${creature.name}.`;
@@ -421,7 +449,6 @@ function performSummonWithSacrifice(
   ensureRuntimeFields(bc);
 
   // Apply on-summon effects
-  applySurge(gs, bc);
   applySpellShield(bc);
 
   player.hand = player.hand.filter((c) => c.id !== creature.id);
@@ -545,18 +572,25 @@ export function summonWithChosenSacrifices(
   }
 
   // Perform sacrifices
-  const sacrificedNames: string[] = [];
-  for (const idx of uniqueSlots) {
-    const bc = player.board[idx];
-    if (!bc) continue;
-    sacrificedNames.push(bc.card.name);
-    
-    // Trigger death effects
-    triggerDeathEffects(gs, playerIndex, idx);
-    
-    player.graveyard.push(bc.card);
-    player.board[idx] = null;
-  }
+const sacrificedNames: string[] = [];
+for (const idx of uniqueSlots) {
+  const bc = player.board[idx];
+  if (!bc) continue;
+  sacrificedNames.push(bc.card.name);
+  
+  // Trigger death effects
+  triggerDeathEffects(gs, playerIndex, idx);
+  
+  // Send relics to graveyard
+  const attachedRelics = player.relics.filter(r => r.slotIndex === idx);
+  attachedRelics.forEach(relicData => {
+    player.graveyard.push(relicData.relic);
+  });
+  player.relics = player.relics.filter(r => r.slotIndex !== idx);
+  
+  player.graveyard.push(bc.card);
+  player.board[idx] = null;
+}
 
   // Place new creature
   const bc: BoardCreature = {
@@ -670,6 +704,17 @@ function applyCreatureDamage(
     // Trigger death effects
     triggerDeathEffects(gs, targetPlayerIndex, slotIndex);
     
+    // Send relics to graveyard
+    const attachedRelics = player.relics.filter(r => r.slotIndex === slotIndex);
+    attachedRelics.forEach(relicData => {
+      player.graveyard.push(relicData.relic);
+      gs.log.push(`${relicData.relic.name} goes to the graveyard.`);
+    });
+    
+    // Remove relics from player's relic list
+    player.relics = player.relics.filter(r => r.slotIndex !== slotIndex);
+    
+    // Send creature to graveyard
     player.graveyard.push(bc.card);
     player.board[slotIndex] = null;
     gs.log.push(`${bc.card.name} dies.`);
@@ -1135,13 +1180,18 @@ export function playDropInEvolution(
     return gs;
   }
 
-  const existing = player.board[slotIndex];
-  if (existing) {
-    player.graveyard.push(existing.card);
-    const relicsToMove = player.relics.filter(r => r.slotIndex === slotIndex);
-    relicsToMove.forEach(r => player.graveyard.push(r.relic));
-    player.relics = player.relics.filter(r => r.slotIndex !== slotIndex);
-  }
+const existing = player.board[slotIndex];
+if (existing) {
+  // Send relics to graveyard
+  const relicsToMove = player.relics.filter(r => r.slotIndex === slotIndex);
+  relicsToMove.forEach(r => {
+    player.graveyard.push(r.relic);
+    gs.log.push(`${r.relic.name} goes to the graveyard.`);
+  });
+  player.relics = player.relics.filter(r => r.slotIndex !== slotIndex);
+  
+  player.graveyard.push(existing.card);
+}
 
   const bc: BoardCreature = {
     card: evo,
