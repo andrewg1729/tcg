@@ -1,0 +1,233 @@
+/* src/CardPreview.css */
+
+.card-preview-panel {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 20%;
+  height: 100vh;
+  background: linear-gradient(to bottom, #0a0e1a 0%, #1a1f35 100%);
+  border-right: 2px solid rgba(255, 255, 255, 0.15);
+  overflow-y: auto;
+  z-index: 1000;
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.5);
+}
+
+.card-preview-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 14px;
+  text-align: center;
+  padding: 20px;
+}
+
+.card-preview-content {
+  padding: 20px;
+  color: #f5f7ff;
+}
+
+.card-preview-image {
+  width: 100%;
+  aspect-ratio: 5/7;
+  background: linear-gradient(145deg, #1d2238, #111527);
+  border-radius: 12px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  margin-bottom: 16px;
+}
+
+.card-preview-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.card-preview-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.3);
+  text-align: center;
+  padding: 20px;
+}
+
+.card-preview-header {
+  margin-bottom: 12px;
+}
+
+.card-preview-name {
+  margin: 0 0 4px 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.card-preview-type {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.card-preview-stats {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.card-preview-stat-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 16px;
+}
+
+.card-preview-stat-row:last-child {
+  margin-bottom: 0;
+}
+
+.stat-label {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.stat-value {
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.atk-value {
+  color: #ff922b;
+}
+
+.hp-value {
+  color: #51cf66;
+}
+
+.stat-buff {
+  color: #ffd43b;
+  font-size: 14px;
+}
+
+.stat-max {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 14px;
+}
+
+.card-preview-keywords,
+.card-preview-active-effects,
+.card-preview-text,
+.card-preview-effects-detail {
+  margin-bottom: 16px;
+}
+
+.card-preview-keywords h4,
+.card-preview-active-effects h4,
+.card-preview-text h4,
+.card-preview-effects-detail h4 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.keyword-list,
+.effect-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.keyword-badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(173, 232, 244, 0.15);
+  border: 1px solid rgba(173, 232, 244, 0.4);
+  font-size: 11px;
+  font-weight: 600;
+  color: #a5d8ff;
+  text-transform: uppercase;
+}
+
+.effect-item {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid;
+}
+
+.effect-item.frozen {
+  background: rgba(115, 192, 222, 0.15);
+  border-color: rgba(115, 192, 222, 0.4);
+  color: #74c0fc;
+}
+
+.effect-item.shield {
+  background: rgba(255, 224, 102, 0.15);
+  border-color: rgba(255, 224, 102, 0.4);
+  color: #ffd43b;
+}
+
+.effect-item.spell-shield {
+  background: rgba(204, 158, 255, 0.15);
+  border-color: rgba(204, 158, 255, 0.4);
+  color: #d0bfff;
+}
+
+.effect-item.sickness {
+  background: rgba(255, 146, 43, 0.15);
+  border-color: rgba(255, 146, 43, 0.4);
+  color: #ff922b;
+}
+
+.effect-item.relics {
+  background: rgba(173, 232, 244, 0.15);
+  border-color: rgba(173, 232, 244, 0.4);
+  color: #a5d8ff;
+}
+
+.card-preview-text p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.card-preview-effects-detail ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.card-preview-effects-detail li {
+  margin-bottom: 4px;
+}
+
+/* Scrollbar styling */
+.card-preview-panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.card-preview-panel::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.card-preview-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+}
+
+.card-preview-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
