@@ -746,26 +746,26 @@ export const fireCardDefinitions: CardDefinition[] = [
     ],
   },
   
-  {
-    id: "F-S-007",
-    name: "Blazing Rebirth",
-    kind: "SLOW_SPELL",
-    text: "Return the top creature from your graveyard to the field in an empty slot. You lose 1 life.",
-    imagePath: "/cards/fire/Blazing Rebirth.png",
-    effects: [
-      {
-        timing: "IMMEDIATE",
-        targetType: "NONE",
-        customScript: "RESURRECT_TO_FIELD",
-      },
-      {
-        timing: "IMMEDIATE",
-        targetType: "TARGET_PLAYER",
-        damage: 1,
-        customScript: "SELF_DAMAGE",
-      },
-    ],
-  },
+{
+  id: "F-S-007",
+  name: "Blazing Rebirth",
+  kind: "SLOW_SPELL",
+  text: "Return the top creature from your graveyard to the field in an empty slot. You lose 1 life.",
+  imagePath: "/cards/fire/Blazing Rebirth.png",
+  effects: [
+    {
+      timing: "IMMEDIATE",
+      targetType: "NONE",
+      customScript: "RESURRECT_TO_FIELD",
+    },
+    {
+      timing: "IMMEDIATE",
+      targetType: "SELF_PLAYER",  // Change from TARGET_PLAYER to SELF_PLAYER
+      damage: 1,
+      // Remove the customScript line entirely
+    },
+  ],
+},
   
   {
     id: "F-S-008",
@@ -802,20 +802,21 @@ export const fireCardDefinitions: CardDefinition[] = [
   },
   
   // ==================== LOCATIONS ====================
-  {
-    id: "F-L-001",
-    name: "Molten Trail",
-    kind: "LOCATION",
-    text: "Once each turn, when one of your creatures hits the enemy, deal 1 extra damage. Lasts 2 of your turns.",
-    imagePath: "/cards/fire/Molten Trail.png",
-    effects: [
-      {
-        timing: "ON_DAMAGE",
-        targetType: "NONE",
-        customScript: "MOLTEN_TRAIL",
-      },
-    ],
-  },
+{
+  id: "F-L-001",
+  name: "Molten Trail",
+  kind: "LOCATION",
+  text: "Once each turn, when one of your creatures hits the enemy, deal 1 extra damage. Lasts 2 of your turns.",
+  imagePath: "/cards/fire/Molten Trail.png",
+  effects: [
+    {
+      timing: "ON_DAMAGE",
+      targetType: "TARGET_PLAYER",
+      damage: 1,
+      customScript: "ONCE_PER_TURN_PER_CREATURE",
+    },
+  ],
+},
 
   // ==================== FIRE EVOLUTIONS ====================
 {

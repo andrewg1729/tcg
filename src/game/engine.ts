@@ -111,10 +111,6 @@ function hasAwaken(cardName: string): boolean {
   return hasKeyword(cardName, "AWAKEN");
 }
 
-// Location names
-const WATER_LOCATION = "Tideswell Basin";
-const FIRE_LOCATION = "Molten Trail";
-
 function applyRelicToCreature(bc: BoardCreature, relic: RelicCard) {
   
   const text = relic.text;
@@ -794,6 +790,13 @@ export function resolveSpellTargeting(
   spellCardId?: string,
   target?: SpellTarget
 ): GameState {
+
+    console.log("=== resolveSpellTargeting called ===");
+  console.log("spellCardId:", spellCardId);
+  console.log("target:", target);
+  console.log("pendingTarget:", state.pendingTarget);
+    console.trace("Call stack:"); // ADD THIS LINE
+
   const gs = cloneState(state);
   
   // If we're setting up targeting (no target provided yet)
@@ -809,24 +812,49 @@ export function resolveSpellTargeting(
     const effects = cardRegistry.getEffects(card.name);
     
     // Determine if targeting is needed based on effect targetType
-    const needsTarget = effects.some(e => 
-      e.targetType === "TARGET_CREATURE" || 
-      e.targetType === "TARGET_PLAYER"
-    );
+const needsTarget = effects.some(e => {
+  // Auto-resolution scripts that don't need targeting
+  const autoResolveScripts = ["SELF_DAMAGE", "RESURRECT_TO_FIELD", "EXCLUDE_SELF"];
+  
+  // If it has an auto-resolve custom script, no targeting needed
+  if (e.customScript && autoResolveScripts.includes(e.customScript)) {
+    return false;
+  }
+  
+  // Otherwise check if it needs user targeting
+  return e.targetType === "TARGET_CREATURE" || e.targetType === "TARGET_PLAYER";
+});
     
-    if (!needsTarget) {
-      // No targeting needed, cast immediately
-      effects.forEach(effect => {
-        effectExecutor.executeEffect(gs, effect, gs.activePlayerIndex, undefined);
-      });
-      
-      // Remove from hand and add to graveyard
-      player.hand = player.hand.filter(c => c.id !== spellCardId);
-      player.graveyard.push(card);
-      markSpellCastAndTriggerCatalyst(gs, gs.activePlayerIndex);
-      
-      return gs;
-    }
+if (!needsTarget) {
+  console.log("Executing spell immediately (no targeting needed)");
+  
+  // Check if this card is already in graveyard (prevent double execution)
+  const alreadyInGraveyard = player.graveyard.some(c => c.id === spellCardId);
+  if (alreadyInGraveyard) {
+    console.log("Card already in graveyard, skipping duplicate execution");
+    return gs;
+  }
+  
+  // Check if this card is still in hand (prevent double execution)
+  const cardStillInHand = player.hand.find(c => c.id === spellCardId);
+  if (!cardStillInHand) {
+    console.log("Card not in hand, skipping");
+    return gs;
+  }
+  
+  // No targeting needed, cast immediately
+  effects.forEach(effect => {
+    console.log("Executing effect:", effect);
+    effectExecutor.executeEffect(gs, effect, gs.activePlayerIndex, undefined);
+  });
+  
+  // Remove from hand and add to graveyard
+  player.hand = player.hand.filter(c => c.id !== spellCardId);
+  player.graveyard.push(cardStillInHand);
+  markSpellCastAndTriggerCatalyst(gs, gs.activePlayerIndex);
+  
+  return gs;
+}
     
     // Determine targeting rule from effects
     let rule: TargetingRule;
@@ -885,11 +913,28 @@ export function resolveSpellTargeting(
     return gs;
   }
   
-  // Execute the spell with the target
-  const effects = cardRegistry.getEffects(source);
-  effects.forEach(effect => {
+// Execute the spell with the target
+const effects = cardRegistry.getEffects(source);
+console.log("Executing effects in resolution:", effects);
+effects.forEach((effect, index) => {
+  console.log(`Effect ${index} targetType:`, effect.targetType);
+  if (effect.targetType === "TARGET_PLAYER") {
+    console.log("Detected TARGET_PLAYER - targeting enemy");
+    // Automatically target enemy player
+    const enemyPlayerIndex = 1 - sourcePlayerIndex;
+    console.log("Enemy index:", enemyPlayerIndex);
+    const enemyTarget = {
+      playerIndex: enemyPlayerIndex,
+      slotIndex: "PLAYER" as const
+    };
+    console.log("Calling executeEffect with:", enemyTarget);
+    effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, enemyTarget);
+  } else {
+    console.log("Not TARGET_PLAYER - using provided target:", target);
+    // Use the provided target for creature-targeting effects
     effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, target);
-  });
+  }
+});
   
   // Remove spell from hand BEFORE clearing pendingTarget
   player.hand = player.hand.filter(c => c.id !== sourceCardId);
@@ -943,6 +988,41 @@ function markSpellCastAndTriggerCatalyst(gs: GameState, playerIndex: number) {
       });
     });
   }
+}
+
+function triggerLocationEffects(
+  gs: GameState, 
+  playerIndex: number, 
+  timing: string,
+  context?: { damageDealt?: number; source?: BoardCreature; slotIndex?: number }
+) {
+  const player = gs.players[playerIndex];
+  if (!player.location) return;
+  
+  const effects = cardRegistry.getEffects(player.location.name);
+  const matchingEffects = effects.filter(e => e.timing === timing);
+  
+  matchingEffects.forEach(effect => {
+    // Track once-per-turn usage if needed
+    const pAny = player as any;
+    const locationKey = player.location!.name;
+    
+    if (effect.customScript?.includes("ONCE_PER_TURN")) {
+      if (!pAny.locationUsedThisTurn) pAny.locationUsedThisTurn = new Set();
+      const usageKey = `${locationKey}-${context?.slotIndex}`;
+      
+      if (pAny.locationUsedThisTurn.has(usageKey)) {
+        return; // Already used this turn
+      }
+      pAny.locationUsedThisTurn.add(usageKey);
+    }
+    
+    // Execute the effect
+    effectExecutor.executeEffect(gs, effect, playerIndex, {
+      playerIndex: 1 - playerIndex,
+      slotIndex: "PLAYER"
+    });
+  });
 }
 
 function triggerOnPlayEffects(gs: GameState, playerIndex: number, slotIndex: number) {
@@ -1223,29 +1303,27 @@ export function attack(
 
   const attackerAtk = getEffectiveAtk(gs, atkPlayerIndex, attackerSlotIndex);
 
-  if (target.slotIndex === "PLAYER") {
-    defenderPlayer.life -= attackerAtk;
-    gs.log.push(`${attacker.card.name} deals ${attackerAtk} damage to ${defenderPlayer.name}.`);
+if (target.slotIndex === "PLAYER") {
+  defenderPlayer.life -= attackerAtk;
+  gs.log.push(`${attacker.card.name} deals ${attackerAtk} damage to ${defenderPlayer.name}.`);
 
-    // Lifetap
-    if (hasLifetap(attacker.card.name)) {
-      healPlayer(gs, atkPlayerIndex, 1, false);
-    }
-
-    // Molten Trail
-    const pAny = attackerPlayer as any;
-    if (attackerPlayer.location?.name === FIRE_LOCATION) {
-      if (!pAny.moltenTrailUsed) pAny.moltenTrailUsed = [false, false, false];
-      if (!pAny.moltenTrailUsed[attackerSlotIndex]) {
-        defenderPlayer.life -= 1;
-        pAny.moltenTrailUsed[attackerSlotIndex] = true;
-        gs.log.push(`Molten Trail deals 1 extra damage to ${defenderPlayer.name}.`);
-      }
-    }
-
-    bcAny.attacksThisTurn += 1;
-    return gs;
+  // Trigger location effects on damage to player
+  if (attackerPlayer.location) {
+    triggerLocationEffects(gs, atkPlayerIndex, "ON_DAMAGE", { 
+      damageDealt: attackerAtk,
+      source: attacker,
+      slotIndex: attackerSlotIndex 
+    });
   }
+
+  // Lifetap
+  if (hasLifetap(attacker.card.name)) {
+    healPlayer(gs, atkPlayerIndex, 1, false);
+  }
+  
+  bcAny.attacksThisTurn += 1;
+  return gs;
+}
 
   // Creature vs creature combat
 const defSlot = target.slotIndex as number;

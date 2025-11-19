@@ -56,11 +56,14 @@ interface PendingSacrificeSummon {
   requiredHp: number;
 }
 
+const executedSpells = new Set<string>();
+
 const GameView: React.FC = () => {
   const [state, setState] = useState<GameState>(() => createInitialGameState());
   const [pendingRelicId, setPendingRelicId] = useState<string | null>(null);
   const [pendingSacSummon, setPendingSacSummon] = useState<PendingSacrificeSummon | null>(null);
   const [selectedSacSlots, setSelectedSacSlots] = useState<number[]>([]);
+const [isCastingSpell, setIsCastingSpell] = useState(false);
 
   // Preview state
   const [previewCard, setPreviewCard] = useState<any>(null);
@@ -212,10 +215,25 @@ function handleAttachRelic(slotIndex: number) {
   }
 
   // Spell/Relic/Location casting
-  function handleCastSpellCard(card: SpellCard) {
-    if (card.kind === "SLOW_SPELL" && state.phase !== "MAIN") return;
-    setState((prev) => resolveSpellTargeting(prev, card.id));
+function handleCastSpellCard(card: SpellCard) {
+  if (card.kind === "SLOW_SPELL" && state.phase !== "MAIN") return;
+  
+  // Check if this exact spell was just cast
+  const key = `${card.id}-${Date.now()}`;
+  if (executedSpells.has(card.id)) {
+    console.log("Spell already being cast, skipping");
+    return;
   }
+  
+  executedSpells.add(card.id);
+  
+  setState((prev) => {
+    const result = resolveSpellTargeting(prev, card.id);
+    // Clean up after a short delay
+    setTimeout(() => executedSpells.delete(card.id), 100);
+    return result;
+  });
+}
 
   function handleClickPlayerAsTarget(playerIndex: number) {
     if (!state.pendingTarget) return;

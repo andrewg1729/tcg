@@ -17,6 +17,7 @@ export type TargetType =
   | "SELF"              // The card itself
   | "TARGET_CREATURE"   // Choose a creature
   | "TARGET_PLAYER"     // Choose a player
+  | "SELF_PLAYER"  // ADD THIS
   | "ALL_FRIENDLY"      // All your creatures
   | "ALL_ENEMY"         // All enemy creatures
   | "ALL_CREATURES"     // All creatures

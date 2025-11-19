@@ -38,36 +38,48 @@ executeEffect(
   }
 }
   
-  private executeImmediateEffect(
-    gs: GameState,
-    effect: CardEffect,
-    playerIndex: number,
-    target?: SpellTarget
-  ): void {
-    const player = gs.players[playerIndex];
-    const enemy = gs.players[1 - playerIndex];
-    
-    // Handle custom scripts first
-    if (effect.customScript) {
-      this.handleCustomScript(gs, effect.customScript, playerIndex, target);
-      return;
-    }
-    
-    // Handle damage
-    if (effect.damage !== undefined) {
-      if (target?.type === "CREATURE") {
-        this.applyDamageToCreature(
-          gs,
-          target.playerIndex,
-          target.slotIndex,
-          effect.damage,
-          true
-        );
-      } else if (target?.type === "PLAYER") {
-        const targetPlayer = gs.players[target.playerIndex];
-        targetPlayer.life -= effect.damage;
-        gs.log.push(`${targetPlayer.name} takes ${effect.damage} damage.`);
-      } else if (effect.targetType === "ALL_ENEMY") {
+private executeImmediateEffect(
+  gs: GameState,
+  effect: CardEffect,
+  playerIndex: number,
+  target?: SpellTarget
+): void {
+  const player = gs.players[playerIndex];
+  const enemy = gs.players[1 - playerIndex];
+  
+  console.log("executeImmediateEffect - target:", target);
+  console.log("target.slotIndex:", target?.slotIndex);
+  console.log("target.type:", target?.type);
+  
+  // Handle custom scripts first
+  if (effect.customScript) {
+    this.handleCustomScript(gs, effect.customScript, playerIndex, target);
+    return;
+  }
+  
+  // Handle damage
+// Handle damage
+if (effect.damage !== undefined) {
+  if (target?.type === "CREATURE") {
+    this.applyDamageToCreature(
+      gs,
+      target.playerIndex,
+      target.slotIndex,
+      effect.damage,
+      true
+    );
+  } else if (target?.type === "PLAYER") {
+    const targetPlayer = gs.players[target.playerIndex];
+    targetPlayer.life -= effect.damage;
+    gs.log.push(`${targetPlayer.name} takes ${effect.damage} damage.`);
+  } else if (target?.slotIndex === "PLAYER") {
+    const targetPlayer = gs.players[target.playerIndex];
+    targetPlayer.life -= effect.damage;
+    gs.log.push(`${targetPlayer.name} takes ${effect.damage} damage.`);
+  } else if (effect.targetType === "SELF_PLAYER") {  // ADD THIS CASE
+    player.life -= effect.damage;
+    gs.log.push(`${player.name} loses ${effect.damage} life.`);
+  } else if (effect.targetType === "ALL_ENEMY") {
         enemy.board.forEach((bc, idx) => {
           if (bc) {
             this.applyDamageToCreature(gs, 1 - playerIndex, idx, effect.damage!, true);
