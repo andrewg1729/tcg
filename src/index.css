@@ -171,12 +171,123 @@ body {
   white-space: nowrap;
 }
 
-/* BOARD ROW */
+/* Board row container */
+.board-row-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 
+/* Board row */
 .board-row {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.board-row-label {
+  font-size: 12px;
+  opacity: 0.85;
+  margin-left: 4px;
+  text-align: center;
+}
+
+/* All slots in one row */
+.board-row-slots-with-zones {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.board-row-slots {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+/* Regular creature slots */
+.board-slot {
+  width: 150px;
+  height: 200px;
+  border-radius: 10px;
+  padding: 4px;
+  background: radial-gradient(circle at top, #161f3a, #05070f);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Zone slots (same size as creature slots) */
+.board-zone-slot {
+  width: 150px;
+  height: 200px;
+  border-radius: 10px;
+  padding: 4px;
+  background: radial-gradient(circle at top, #161f3a, #05070f);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.board-zone-slot:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.9);
+}
+
+.board-slot-label {
+  font-size: 11px;
+  text-align: center;
+  opacity: 0.7;
+}
+
+.zone-slot-content {
+  flex: 1;
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.zone-slot-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.zone-slot-placeholder {
+  font-size: 48px;
+  opacity: 0.4;
+}
+
+.zone-slot-count {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(0, 0, 0, 0.9);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.board-slot-empty {
+  flex: 1;
+  border-radius: 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .board-row-label {
@@ -220,8 +331,74 @@ body {
   color: rgba(255, 255, 255, 0.5);
 }
 
-/* BOARD CREATURES WITH IMAGES */
+/* RELICS ROW - positioned below the board slots */
+.board-relics-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding-left: 0;
+  min-height: 50px;
+}
 
+.board-relic-slot {
+  width: 150px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+/* Attached relics */
+.attached-relics {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  padding: 4px;
+  background: transparent; /* Remove background */
+  border-radius: 6px;
+  border: none; /* Remove border */
+  margin-top: -35px; /* Changed from -15px */
+  position: relative;
+  z-index: 1; /* Behind creature cards */
+}
+
+.attached-relic-mini {
+  width: 120px; 
+  height: 80px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: none; /* Remove border */
+  background: rgba(0, 0, 0, 0.6);
+  transition: all 0.2s ease;
+  cursor: pointer;
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.attached-relic-mini:hover {
+  transform: translateY(-4px) scale(1.05);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.8);
+}
+
+.attached-relic-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attached-relic-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  text-align: center;
+  padding: 4px;
+}
+
+/* BOARD CREATURES WITH IMAGES */
 .board-creature-container {
   position: relative;
   width: 100%;
@@ -230,6 +407,7 @@ body {
   overflow: hidden;
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+  z-index: 2; /* Above relics */
 }
 
 .board-creature-container:hover {
@@ -237,10 +415,21 @@ body {
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.9);
 }
 
-.card-frame-targetable .board-creature-container {
-  outline: 2px solid #ffd43b;
-  box-shadow: 0 0 0 2px rgba(255, 212, 59, 0.4),
-    0 3px 12px rgba(255, 212, 59, 0.6);
+/* Valid target glow effect */
+.board-creature-container.valid-target {
+  outline: 3px solid #51cf66;
+  box-shadow: 0 0 20px rgba(81, 207, 102, 0.8);
+  animation: target-pulse 1.5s ease-in-out infinite;
+  cursor: pointer;
+}
+
+@keyframes target-pulse {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(81, 207, 102, 0.8);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(81, 207, 102, 1);
+  }
 }
 
 .board-creature-image {
@@ -309,13 +498,7 @@ body {
 }
 
 .relic-indicator {
-  align-self: center;
-  padding: 2px 5px;
-  border-radius: 6px;
-  background: rgba(173, 232, 244, 0.9);
-  font-size: 9px;
-  font-weight: 700;
-  color: #0c4a6e;
+  display: none;
 }
 
 .board-creature-actions {

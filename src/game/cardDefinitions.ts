@@ -31,7 +31,7 @@ export const waterCardDefinitions: CardDefinition[] = [
     rank: 1,
     atk: 2,
     hp: 3,
-    text: "Guard. Death: Heal your leader 1.",
+    text: "Guard. Death: Heal 1.",
     imagePath: "/cards/water/Tide Whelpling.png",
     keywords: [{ keyword: "GUARD", guard: true }],
     effects: [
@@ -107,7 +107,7 @@ export const waterCardDefinitions: CardDefinition[] = [
     rank: 2,
     atk: 3,
     hp: 3,
-    text: "Death: Heal your leader 2.",
+    text: "Death: Heal 2.",
     imagePath: "/cards/water/Abyss Angler.png",
     effects: [
       {
@@ -150,7 +150,7 @@ export const waterCardDefinitions: CardDefinition[] = [
     rank: 3,
     atk: 5,
     hp: 5,
-    text: "Piercing. Excess damage to creatures carries over to the enemy leader.",
+    text: "Piercing.",
     imagePath: "/cards/water/Coralyte.png",
     keywords: [{ keyword: "PIERCING", piercing: true }],
   },
@@ -252,7 +252,7 @@ export const waterCardDefinitions: CardDefinition[] = [
     id: "W-S-005",
     name: "Bubble Scripture",
     kind: "SLOW_SPELL",
-    text: "Heal your leader 3, then draw 1.",
+    text: "Heal 3, then draw 1.",
     imagePath: "/cards/water/Bubble Scripture.png",
     effects: [
       {
@@ -272,7 +272,7 @@ export const waterCardDefinitions: CardDefinition[] = [
     id: "W-S-006",
     name: "Water Slash",
     kind: "FAST_SPELL",
-    text: "Deal 3 damage to a creature. If it dies, heal your leader 1.",
+    text: "Deal 3 damage to a creature. If it dies, heal 1.",
     imagePath: "/cards/water/Water Slash.png",
     effects: [
       {
@@ -319,7 +319,7 @@ export const waterCardDefinitions: CardDefinition[] = [
     id: "W-R-001",
     name: "Coral Bulwark",
     kind: "RELIC",
-    text: "Equipped creature gets Armor 1.",
+    text: "Grant Armor 1.",
     imagePath: "/cards/water/Coral Bulwark.png",
     keywords: [{ keyword: "ARMOR", armor: 1 }],
   },
@@ -328,7 +328,7 @@ export const waterCardDefinitions: CardDefinition[] = [
     id: "W-R-002",
     name: "Moon Pearl Amulet",
     kind: "RELIC",
-    text: "Equipped creature gets Regen 1.",
+    text: "Grant Regen 1.",
     imagePath: "/cards/water/Moon Pearl Amulet.png",
     keywords: [{ keyword: "REGEN", regen: 1 }],
   },
@@ -359,7 +359,7 @@ export const waterCardDefinitions: CardDefinition[] = [
   requiredRank: 1,
   atk: 4,
   hp: 6,
-  text: "Evolve from Tide Whelpling when it has taken damage but survived. Guard. Armor 1. Death: Heal your leader 2.",
+  text: "Evolve from Tide Whelpling when it has taken damage but survived. Guard. Armor 1. Death: Heal 2.",
   imagePath: "/cards/water/Tide Guardian.png",
   keywords: [
     { keyword: "GUARD", guard: true },
@@ -495,7 +495,7 @@ export const fireCardDefinitions: CardDefinition[] = [
     rank: 1,
     atk: 1,
     hp: 2,
-    text: "Death: Deal 1 damage to the enemy leader.",
+    text: "Death: Deal 1 damage to the enemy.",
     imagePath: "/cards/fire/Flarby.png",
     effects: [
       {
@@ -513,7 +513,7 @@ export const fireCardDefinitions: CardDefinition[] = [
     rank: 1,
     atk: 2,
     hp: 2,
-    text: "Awaken. While your life is lower than your opponent's, this gets +1 ATK.",
+    text: "Awaken: +1 ATK.",
     imagePath: "/cards/fire/Cinderhawk.png",
     keywords: [{ keyword: "AWAKEN" }],
   },
@@ -537,7 +537,7 @@ export const fireCardDefinitions: CardDefinition[] = [
     rank: 1,
     atk: 1,
     hp: 3,
-    text: "Lifetap. When this hits the enemy leader, heal your leader 1.",
+    text: "Lifetap.",
     imagePath: "/cards/fire/Prismflare Beetle.png",
     keywords: [{ keyword: "LIFETAP", lifetap: true }],
   },
@@ -562,7 +562,7 @@ export const fireCardDefinitions: CardDefinition[] = [
     rank: 2,
     atk: 4,
     hp: 3,
-    text: "Piercing. Excess damage to creatures carries over to the enemy leader.",
+    text: "Piercing.",
     imagePath: "/cards/fire/Infernowl.png",
     keywords: [{ keyword: "PIERCING", piercing: true }],
   },
@@ -592,24 +592,23 @@ export const fireCardDefinitions: CardDefinition[] = [
   },
   
   // ==================== RANK 3 CREATURES ====================
-  {
-    id: "F-C-201",
-    name: "Pyrethorn Charger",
-    kind: "CREATURE",
-    rank: 3,
-    atk: 5,
-    hp: 4,
-    text: "On Attack: Deal 1 damage to all other creatures.",
-    imagePath: "/cards/fire/Pyrethorn Charger.png",
-    effects: [
-      {
-        timing: "ON_ATTACK",
-        targetType: "ALL_CREATURES",
-        damage: 1,
-        customScript: "EXCLUDE_SELF",
-      },
-    ],
-  },
+{
+  id: "F-C-201",
+  name: "Pyrethorn Charger",
+  kind: "CREATURE",
+  rank: 3,
+  atk: 5,
+  hp: 4,
+  text: "On Attack: Deal 1 damage to all enemy creatures.",
+  imagePath: "/cards/fire/Pyrethorn Charger.png",
+  effects: [
+    {
+      timing: "ON_ATTACK",
+      targetType: "ALL_ENEMY",  // Change this from ALL_CREATURES
+      damage: 1,
+    },
+  ],
+},
   
   {
     id: "F-C-202",
@@ -676,10 +675,10 @@ export const fireCardDefinitions: CardDefinition[] = [
   
   {
     id: "F-S-003",
-    name: "Ignite Path",
+    name: "Fireball",
     kind: "FAST_SPELL",
     text: "Deal 3 damage to a creature.",
-    imagePath: "/cards/fire/Ignite Path.png",
+    imagePath: "/cards/fire/Fireball.png",
     effects: [
       {
         timing: "IMMEDIATE",
@@ -709,7 +708,7 @@ export const fireCardDefinitions: CardDefinition[] = [
     id: "F-S-005",
     name: "Ash to Ash",
     kind: "SLOW_SPELL",
-    text: "Destroy a Rank 1 creature. Then deal 1 damage to the enemy leader.",
+    text: "Destroy a Rank 1 creature. Then deal 1 damage to the enemy.",
     imagePath: "/cards/fire/Ash to Ash.png",
     effects: [
       {
@@ -730,7 +729,7 @@ export const fireCardDefinitions: CardDefinition[] = [
     id: "F-S-006",
     name: "Overheat",
     kind: "SLOW_SPELL",
-    text: "Deal 5 damage to a creature. Your leader loses 2 life.",
+    text: "Deal 5 damage to a creature. You lose 2 life.",
     imagePath: "/cards/fire/Overheat.png",
     effects: [
       {
@@ -788,7 +787,7 @@ export const fireCardDefinitions: CardDefinition[] = [
     id: "F-R-001",
     name: "Ember-Iron Gauntlets",
     kind: "RELIC",
-    text: "Equipped creature gets +2 ATK.",
+    text: "+2 ATK.",
     imagePath: "/cards/fire/Ember-Iron Gauntlets.png",
     keywords: [{ keyword: "ATK_BONUS", customScript: "ATK_2" }],
   },
@@ -797,7 +796,7 @@ export const fireCardDefinitions: CardDefinition[] = [
     id: "F-R-002",
     name: "Cinder Plate",
     kind: "RELIC",
-    text: "Equipped creature gets +3 HP.",
+    text: "+3 HP.",
     imagePath: "/cards/fire/Cinder Plate.png",
     keywords: [{ keyword: "HP_BONUS", customScript: "HP_3" }],
   },
@@ -807,7 +806,7 @@ export const fireCardDefinitions: CardDefinition[] = [
     id: "F-L-001",
     name: "Molten Trail",
     kind: "LOCATION",
-    text: "Once each turn, when one of your creatures hits the enemy leader, deal 1 extra damage. Lasts 2 of your turns.",
+    text: "Once each turn, when one of your creatures hits the enemy, deal 1 extra damage. Lasts 2 of your turns.",
     imagePath: "/cards/fire/Molten Trail.png",
     effects: [
       {
@@ -895,7 +894,7 @@ export const fireCardDefinitions: CardDefinition[] = [
   requiredRank: 1,
   atk: 5,
   hp: 6,
-  text: "Evolve from Prismflare Beetle if you've healed this turn. Lifetap. Regen 1. When this deals damage to the enemy leader, deal 2 damage to a random enemy creature.",
+  text: "Evolve from Prismflare Beetle if you've healed this turn. Lifetap. Regen 1. When this deals damage to the enemy, deal 2 damage to a random enemy creature.",
   imagePath: "/cards/fire/Prismflare Colossus.png",
   keywords: [
     { keyword: "LIFETAP", lifetap: true },

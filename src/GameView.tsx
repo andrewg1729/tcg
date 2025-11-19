@@ -5,15 +5,18 @@ import {
   playCreature,
   attack,
   endPhase,
-  castSpell,
   playRelic,
   playLocation,
   transformEvolution,
   playDropInEvolution,
-  type SpellTarget,
   getSummonHpCostForCard,
   chooseDiscardFromHand,
   summonWithChosenSacrifices,
+  resolveOnPlayTargeting,
+  getValidTargets,
+  resolveSpellTargeting,
+  resolveRelicTargeting,
+  cloneState,
 } from "./game/engine";
 import {
   GameState,
@@ -23,13 +26,17 @@ import {
   RelicCard,
   LocationCard,
   EvolutionCard,
-  BoardCreature,
-  Phase,
   PlayerState,
 } from "./game/types";
 import { CardPreview } from "./components/CardPreview";
+import { GameHeader } from "./components/GameHeader";
+import { PlayerHUD } from "./components/PlayerHUD";
+import { BoardRow } from "./components/BoardRow";
+import { HandSection } from "./components/HandSection";
+import { EvolutionSection } from "./components/EvolutionSection";
+import { GameControls } from "./components/GameControls";
 
-// ---------- Type guards ----------
+// Type guards
 function isCreature(card: MainDeckCard): card is CreatureCard {
   return card.kind === "CREATURE";
 }
@@ -43,19 +50,6 @@ function isLocation(card: MainDeckCard): card is LocationCard {
   return card.kind === "LOCATION";
 }
 
-// Spells that don't need explicit targets
-const noTargetSpells = new Set<string>([
-  "Swell Surge",
-  "Bubble Scripture",
-  "Firecall Rally",
-  "Return from the Depths",
-  "Seabed Retrieval",
-  "Blazing Rebirth",
-  "Ashes Remembered",
-]);
-
-const slotLabels = ["Left", "Center", "Right"];
-
 interface PendingSacrificeSummon {
   cardId: string;
   targetSlot: number;
@@ -64,12 +58,11 @@ interface PendingSacrificeSummon {
 
 const GameView: React.FC = () => {
   const [state, setState] = useState<GameState>(() => createInitialGameState());
-  const [pendingSpellId, setPendingSpellId] = useState<string | null>(null);
   const [pendingRelicId, setPendingRelicId] = useState<string | null>(null);
   const [pendingSacSummon, setPendingSacSummon] = useState<PendingSacrificeSummon | null>(null);
   const [selectedSacSlots, setSelectedSacSlots] = useState<number[]>([]);
 
-  // Preview state - now persists
+  // Preview state
   const [previewCard, setPreviewCard] = useState<any>(null);
   const [previewPlayerState, setPreviewPlayerState] = useState<PlayerState | undefined>(undefined);
   const [previewSlotIndex, setPreviewSlotIndex] = useState<number | undefined>(undefined);
@@ -79,36 +72,41 @@ const GameView: React.FC = () => {
   const active = state.players[activeIndex];
   const enemy = state.players[enemyIndex];
 
-  // Updated hover handlers that set but don't clear
   const handleCardHover = (card: any, playerState?: PlayerState, slotIndex?: number) => {
     setPreviewCard(card);
     setPreviewPlayerState(playerState);
     setPreviewSlotIndex(slotIndex);
   };
 
-  // -------- Spell casting --------
-  function startCastingSpell(cardId: string) {
-    setPendingRelicId(null);
-    setPendingSpellId(cardId);
-  }
+  // Relic attaching
+function startAttachingRelic(cardId: string) {
+  setState((prev) => {
+    const gs = cloneState(prev);
+    const player = gs.players[gs.activePlayerIndex];
+    const card = player.hand.find(c => c.id === cardId);
+    
+    if (!card || card.kind !== "RELIC") {
+      return prev;
+    }
+    
+    // Set up targeting for relic
+    gs.pendingTarget = {
+      source: card.name,
+      rule: { type: "FRIENDLY_CREATURES" },
+      sourcePlayerIndex: gs.activePlayerIndex,
+      sourceCardId: cardId,
+      sourceType: "RELIC",
+    };
+    
+    gs.log.push(`${card.name} needs a target. Click one of your creatures.`);
+    return gs;
+  });
+}
 
-  function handleSelectSpellTarget(target: SpellTarget) {
-    if (!pendingSpellId) return;
-    setState((prev) => castSpell(prev, pendingSpellId, target));
-    setPendingSpellId(null);
-  }
-
-  // -------- Relic attaching --------
-  function startAttachingRelic(cardId: string) {
-    setPendingSpellId(null);
-    setPendingRelicId(cardId);
-  }
-
-  function handleAttachRelic(slotIndex: number) {
-    if (!pendingRelicId) return;
-    setState((prev) => playRelic(prev, pendingRelicId, slotIndex));
-    setPendingRelicId(null);
-  }
+// Remove the old handleAttachRelic function and replace with this:
+function handleAttachRelic(slotIndex: number) {
+  setState((prev) => resolveRelicTargeting(prev, slotIndex));
+}
 
   const handleChooseDiscard = (handCardId: string) => {
     setState((prev) => chooseDiscardFromHand(prev, handCardId));
@@ -118,13 +116,11 @@ const GameView: React.FC = () => {
     state.pendingDiscard != null &&
     state.pendingDiscard.playerIndex === state.activePlayerIndex;
 
-  // -------- Creatures --------
+  // Creatures
   function handlePlayCreature(card: MainDeckCard, slotIndex: number) {
     if (!isCreature(card)) return;
 
-    // Rank 1: normal summon immediately (requires empty slot)
     if ((card as CreatureCard).rank === 1) {
-      setPendingSpellId(null);
       setPendingRelicId(null);
       setPendingSacSummon(null);
       setSelectedSacSlots([]);
@@ -132,11 +128,9 @@ const GameView: React.FC = () => {
       return;
     }
 
-    // Rank 2/3: enter sacrifice selection mode
     const creature = card as CreatureCard;
     const cost = getSummonHpCostForCard(creature);
 
-    setPendingSpellId(null);
     setPendingRelicId(null);
     setPendingSacSummon({
       cardId: card.id,
@@ -146,38 +140,29 @@ const GameView: React.FC = () => {
     setSelectedSacSlots([]);
   }
 
-  // -------- Attack --------
+  // Attack
   function handleAttack(mySlot: number, target: "PLAYER" | number) {
-    const targetSpec: SpellTarget =
-      target === "PLAYER"
-        ? { type: "PLAYER", playerIndex: enemyIndex }
-        : { type: "CREATURE", playerIndex: enemyIndex, slotIndex: target };
     setState((prev) =>
       attack(prev, mySlot, {
-        playerIndex:
-          targetSpec.type === "PLAYER"
-            ? targetSpec.playerIndex
-            : targetSpec.playerIndex,
-        slotIndex: targetSpec.type === "PLAYER" ? "PLAYER" : targetSpec.slotIndex,
+        playerIndex: target === "PLAYER" ? enemyIndex : enemyIndex,
+        slotIndex: target === "PLAYER" ? "PLAYER" : target,
       })
     );
   }
 
-  // -------- Phase control --------
+  // Phase control
   function handleEndPhase() {
-    setPendingSpellId(null);
     setPendingRelicId(null);
     setState((prev) => endPhase(prev));
   }
 
-  // -------- Locations --------
+  // Locations
   function handlePlayLocation(card: LocationCard) {
-    setPendingSpellId(null);
     setPendingRelicId(null);
     setState((prev) => playLocation(prev, card.id));
   }
 
-  // -------- Sacrifice selection for Rank 2/3 summons --------
+  // Sacrifice selection
   function handleToggleSacrificeSlot(slotIndex: number) {
     if (!pendingSacSummon) return;
 
@@ -213,7 +198,7 @@ const GameView: React.FC = () => {
     }
   }
 
-  // -------- Evolutions --------
+  // Evolutions
   function handleTransformEvo(evo: EvolutionCard, slotIndex: number) {
     setState((prev) => transformEvolution(prev, evo.id, slotIndex));
   }
@@ -226,629 +211,146 @@ const GameView: React.FC = () => {
     setState((prev) => playDropInEvolution(prev, evo.id, slotIndex, overwriteExisting));
   }
 
-  // -------- Spell cast from hand --------
+  // Spell/Relic/Location casting
   function handleCastSpellCard(card: SpellCard) {
     if (card.kind === "SLOW_SPELL" && state.phase !== "MAIN") return;
-
-    if (noTargetSpells.has(card.name)) {
-      const target: SpellTarget = { type: "NONE" };
-      setState((prev) => castSpell(prev, card.id, target));
-      return;
-    }
-
-    startCastingSpell(card.id);
+    setState((prev) => resolveSpellTargeting(prev, card.id));
   }
 
   function handleClickPlayerAsTarget(playerIndex: number) {
-    if (!pendingSpellId) return;
-    const target: SpellTarget = { type: "PLAYER", playerIndex };
-    handleSelectSpellTarget(target);
+    if (!state.pendingTarget) return;
+    setState((prev) => resolveSpellTargeting(prev, undefined, { type: "PLAYER", playerIndex }));
   }
 
-  const infoText =
-    pendingSpellId != null
-      ? "Select a target for your spell (click a creature or player portrait)."
-      : pendingRelicId != null
-      ? "Select one of your creatures to attach the relic."
-      : pendingSacSummon != null
-      ? `Choose your sacrifices (need ${pendingSacSummon.requiredHp} total HP).`
-      : "";
+const infoText = state.pendingTarget
+  ? `${state.pendingTarget.source} needs a target. Click a valid target.`
+  : pendingSacSummon != null
+  ? `Choose your sacrifices (need ${pendingSacSummon.requiredHp} total HP).`
+  : "";
+
+  const validTargets = state.pendingTarget 
+    ? getValidTargets(state, state.pendingTarget.rule)
+    : [];
+
+const handleCreatureClick = (playerIndex: number, slotIndex: number) => {
+  if (state.pendingTarget) {
+    if (state.pendingTarget.sourceType === "ON_PLAY") {
+      setState((prev) => resolveOnPlayTargeting(prev, playerIndex, slotIndex));
+    } else if (state.pendingTarget.sourceType === "SPELL") {
+      setState((prev) => resolveSpellTargeting(prev, undefined, { type: "CREATURE", playerIndex, slotIndex }));
+    } else if (state.pendingTarget.sourceType === "RELIC") {
+      setState((prev) => resolveRelicTargeting(prev, slotIndex));
+    }
+  } else if (pendingSacSummon) {
+    handleToggleSacrificeSlot(slotIndex);
+  }
+};
 
   return (
     <div className="game-root-with-preview">
-      {/* Card Preview Panel */}
       <CardPreview 
         card={previewCard} 
         playerState={previewPlayerState}
         slotIndex={previewSlotIndex}
+          gameState={state} // Add this
+  playerIndex={
+    previewPlayerState === state.players[0] ? 0 :
+    previewPlayerState === state.players[1] ? 1 :
+    undefined
+  } // Add this
       />
 
-      {/* Main Game Area */}
       <div className="game-main-area">
-        <div className="game-header">
-          <h1>Constellations TCG — Local Playtest</h1>
-          <div className="game-header-row">
-            <span>
-              Turn <strong>{state.turnNumber}</strong> —{" "}
-              <strong>{active.name}</strong>&rsquo;s turn ({state.phase})
-            </span>
-            <button onClick={() => setState(createInitialGameState())}>Reset Game</button>
-          </div>
-          {infoText && <div className="game-info-banner">{infoText}</div>}
-        </div>
+        <GameHeader
+          state={state}
+          active={active}
+          infoText={infoText}
+          onReset={() => setState(createInitialGameState())}
+        />
 
         <div className="board-mat">
-          {/* Enemy HUD */}
           <PlayerHUD
             player={enemy}
             isActive={enemyIndex === activeIndex}
             isTop
             onClickPortrait={
-              pendingSpellId ? () => handleClickPlayerAsTarget(enemyIndex) : undefined
+              state.pendingTarget ? () => handleClickPlayerAsTarget(enemyIndex) : undefined
             }
           />
 
-          {/* Enemy board row */}
-          <BoardRow
-            label={`${enemy.name} Field`}
-            playerIndex={enemyIndex}
-            state={state}
-            isActiveRow={false}
-            pendingSpell={pendingSpellId != null}
-            onClickCreature={(pIdx, sIdx) =>
-              handleSelectSpellTarget({
-                type: "CREATURE",
-                playerIndex: pIdx,
-                slotIndex: sIdx,
-              })
-            }
-            onMouseEnterCreature={(bc, player, slotIndex) => 
-              handleCardHover(bc, player, slotIndex)
-            }
-          />
+<BoardRow
+  label={`${enemy.name} Field`}
+  playerIndex={enemyIndex}
+  state={state}
+  isActiveRow={false}
+  validTargets={validTargets}
+  onClickCreature={handleCreatureClick}
+  onMouseEnterCreature={(bc, player, slotIndex) => 
+    handleCardHover(bc, player, slotIndex)
+  }
+  onMouseEnterRelic={(relic) => handleCardHover(relic)} // Add this
+    onMouseEnterEvolution={(evo) => handleCardHover(evo)}
+  onMouseEnterLocation={(location) => handleCardHover(location)}
+/>
 
-          {/* Middle divider */}
           <div className="board-divider" />
+<BoardRow
+  label={`${active.name} Field`}
+  playerIndex={activeIndex}
+  state={state}
+  isActiveRow
+  validTargets={validTargets}
+  onClickCreature={handleCreatureClick}
+  onAttack={
+    state.phase === "ATTACK" && !state.pendingTarget
+      ? handleAttack
+      : undefined
+  }
+  onMouseEnterCreature={(bc, player, slotIndex) => 
+    handleCardHover(bc, player, slotIndex)
+  }
+  onMouseEnterRelic={(relic) => handleCardHover(relic)} // Add this
+    onMouseEnterEvolution={(evo) => handleCardHover(evo)}
+  onMouseEnterLocation={(location) => handleCardHover(location)}
+/>
 
-          {/* Active player board row */}
-          <BoardRow
-            label={`${active.name} Field`}
-            playerIndex={activeIndex}
-            state={state}
-            isActiveRow
-            pendingSpell={pendingSpellId != null}
-            pendingRelic={pendingRelicId != null}
-            onClickCreature={(pIdx, sIdx) =>
-              pendingSpellId
-                ? handleSelectSpellTarget({
-                    type: "CREATURE",
-                    playerIndex: pIdx,
-                    slotIndex: sIdx,
-                  })
-                : pendingSacSummon
-                ? handleToggleSacrificeSlot(sIdx)
-                : undefined
-            }
-            onAttachRelic={handleAttachRelic}
-            onAttack={
-              state.phase === "ATTACK" && pendingSpellId == null
-                ? handleAttack
-                : undefined
-            }
-            onMouseEnterCreature={(bc, player, slotIndex) => 
-              handleCardHover(bc, player, slotIndex)
-            }
-          />
-
-          {/* Active HUD */}
           <PlayerHUD
             player={active}
             isActive
             onClickPortrait={
-              pendingSpellId ? () => handleClickPlayerAsTarget(activeIndex) : undefined
+              state.pendingTarget ? () => handleClickPlayerAsTarget(activeIndex) : undefined
             }
           />
         </div>
 
-        {/* Hand + Evolutions + Controls */}
         <div className="bottom-panel">
-          {/* Active player's hand */}
-          <section className="hand-section">
-            <h3>Your Hand ({active.hand.length})</h3>
-            <div className="hand-strip">
-              {active.hand.map((card, i) => (
-                <HandCard
-                  key={card.id}
-                  card={card}
-                  phase={state.phase}
-                  isActivePlayer={activeIndex === state.activePlayerIndex}
-                  onSummon={(slotIndex) => handlePlayCreature(card, slotIndex)}
-                  onCastSpell={
-                    isSpell(card)
-                      ? () => handleCastSpellCard(card as SpellCard)
-                      : undefined
-                  }
-                  onPlayRelic={
-                    isRelic(card) ? () => startAttachingRelic(card.id) : undefined
-                  }
-                  onPlayLocation={
-                    isLocation(card)
-                      ? () => handlePlayLocation(card as LocationCard)
-                      : undefined
-                  }
-                  index={i}
-                  total={active.hand.length}
-                  isDiscardMode={isDiscardMode}
-                  onDiscard={handleChooseDiscard}
-                  onMouseEnter={() => handleCardHover(card)}
-                />
-              ))}
-            </div>
-          </section>
+          <HandSection
+            hand={active.hand}
+            phase={state.phase}
+            isActivePlayer={true}
+            isDiscardMode={isDiscardMode}
+            onPlayCreature={handlePlayCreature}
+            onCastSpell={handleCastSpellCard}
+            onPlayRelic={startAttachingRelic}
+            onPlayLocation={handlePlayLocation}
+            onDiscard={handleChooseDiscard}
+            onMouseEnter={handleCardHover}
+          />
 
-          {/* Evolution row */}
-          <section className="evo-section">
-            <h3>Your Evolutions ({active.evolutionDeck.length})</h3>
-            <div className="evo-strip">
-              {active.evolutionDeck.map((evo) => (
-                <EvolutionCardView
-                  key={evo.id}
-                  evo={evo}
-                  player={active}
-                  onTransform={(slotIndex) => handleTransformEvo(evo, slotIndex)}
-                  onDropIn={(slotIndex, overwrite) =>
-                    handleDropInEvo(evo, slotIndex, overwrite)
-                  }
-                  onMouseEnter={() => handleCardHover(evo)}
-                />
-              ))}
-            </div>
-          </section>
+          <EvolutionSection
+            evolutions={active.evolutionDeck}
+            player={active}
+            onTransform={handleTransformEvo}
+            onDropIn={handleDropInEvo}
+            onMouseEnter={handleCardHover}
+          />
 
-          {/* Turn controls + log */}
-          <section className="controls-log">
-            <div className="controls-column">
-              <button className="end-phase-btn" onClick={handleEndPhase}>
-                End Phase
-              </button>
-              <div className="phase-indicator">
-                Current phase: <strong>{state.phase}</strong>
-              </div>
-            </div>
-            <div className="log-column">
-              <h3>Game Log</h3>
-              <div className="log-box">
-                {state.log
-                  .slice()
-                  .reverse()
-                  .map((l, i) => (
-                    <div key={i}>{l}</div>
-                  ))}
-              </div>
-            </div>
-          </section>
+          <GameControls
+            phase={state.phase}
+            log={state.log}
+            onEndPhase={handleEndPhase}
+          />
         </div>
-      </div>
-    </div>
-  );
-};
-
-// -----------------------------------------------------------------------------
-// Player HUD (portrait / life / deck / graveyard / location)
-// -----------------------------------------------------------------------------
-
-interface PlayerHUDProps {
-  player: PlayerState;
-  isActive: boolean;
-  isTop?: boolean;
-  onClickPortrait?: () => void;
-}
-
-const PlayerHUD: React.FC<PlayerHUDProps> = ({
-  player,
-  isActive,
-  isTop,
-  onClickPortrait,
-}) => {
-  return (
-    <div className={`player-hud ${isTop ? "player-hud-top" : "player-hud-bottom"}`}>
-      <div
-        className={`player-portrait ${isActive ? "player-portrait-active" : ""} ${
-          onClickPortrait ? "player-portrait-clickable" : ""
-        }`}
-        onClick={onClickPortrait}
-      >
-        <div className="player-name">{player.name}</div>
-        <div className="player-life">{player.life}</div>
-      </div>
-      <div className="player-zones">
-        <div className="zone-pill">
-          Deck
-          <span className="zone-count">{player.deck.length}</span>
-        </div>
-        <div className="zone-pill">
-          Hand
-          <span className="zone-count">{player.hand.length}</span>
-        </div>
-        <div className="zone-pill">
-          Grave
-          <span className="zone-count">{player.graveyard.length}</span>
-        </div>
-        <div className="zone-pill">
-          Location
-          <span className="zone-slot">
-            {player.location ? player.location.name : "—"}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// -----------------------------------------------------------------------------
-// Board Row (3 slots)
-// -----------------------------------------------------------------------------
-
-interface BoardRowProps {
-  label: string;
-  playerIndex: number;
-  state: GameState;
-  isActiveRow: boolean;
-  pendingSpell?: boolean;
-  pendingRelic?: boolean;
-  onAttack?: (mySlot: number, target: "PLAYER" | number) => void;
-  onClickCreature?: (playerIndex: number, slotIndex: number) => void;
-  onAttachRelic?: (slotIndex: number) => void;
-  onMouseEnterCreature?: (bc: BoardCreature, player: PlayerState, slotIndex: number) => void;
-}
-
-const BoardRow: React.FC<BoardRowProps> = ({
-  label,
-  playerIndex,
-  state,
-  isActiveRow,
-  pendingSpell,
-  pendingRelic,
-  onAttack,
-  onClickCreature,
-  onAttachRelic,
-  onMouseEnterCreature,
-}) => {
-  const player = state.players[playerIndex];
-
-  return (
-    <div className="board-row">
-      <div className="board-row-label">{label}</div>
-      <div className="board-row-slots">
-        {player.board.map((bc, idx) => (
-          <div key={idx} className="board-slot">
-            <div className="board-slot-label">{slotLabels[idx]}</div>
-            {bc ? (
-              <BoardCreatureView
-                bc={bc}
-                slotIndex={idx}
-                player={player}
-                isActiveRow={isActiveRow}
-                phase={state.phase}
-                pendingSpell={pendingSpell}
-                pendingRelic={pendingRelic}
-                onAttack={onAttack}
-                onClick={
-                  onClickCreature
-                    ? () => onClickCreature(playerIndex, idx)
-                    : undefined
-                }
-                onAttachRelic={onAttachRelic}
-                onMouseEnter={
-                  onMouseEnterCreature
-                    ? () => onMouseEnterCreature(bc, player, idx)
-                    : undefined
-                }
-              />
-            ) : (
-              <div className="board-slot-empty">Empty</div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-interface BoardCreatureViewProps {
-  bc: BoardCreature;
-  slotIndex: number;
-  player: PlayerState;
-  isActiveRow: boolean;
-  phase: Phase;
-  pendingSpell?: boolean;
-  pendingRelic?: boolean;
-  onAttack?: (mySlot: number, target: "PLAYER" | number) => void;
-  onClick?: () => void;
-  onAttachRelic?: (slotIndex: number) => void;
-  onMouseEnter?: () => void;
-}
-
-const BoardCreatureView: React.FC<BoardCreatureViewProps> = ({
-  bc,
-  slotIndex,
-  player,
-  isActiveRow,
-  phase,
-  pendingSpell,
-  pendingRelic,
-  onAttack,
-  onClick,
-  onAttachRelic,
-  onMouseEnter,
-}) => {
-  const card = bc.card as CreatureCard | EvolutionCard;
-
-  const baseAtk = (card as any).atk ?? 0;
-  const tempAtkBuff = (bc as any).tempAtkBuff ?? 0;
-  const displayAtk = baseAtk + tempAtkBuff;
-
-  const relicCount = player.relics.filter((r) => r.slotIndex === slotIndex).length;
-
-  return (
-    <div
-      className={`board-creature-container ${
-        pendingSpell ? "card-frame-targetable" : ""
-      }`}
-      onClick={onClick}
-      onMouseEnter={onMouseEnter}
-    >
-      {/* Card Image */}
-      {card.imagePath ? (
-        <img 
-          src={card.imagePath} 
-          alt={card.name} 
-          className="board-creature-image"
-        />
-      ) : (
-        <div className="board-creature-placeholder">
-          {card.name}
-        </div>
-      )}
-
-      {/* Overlay with stats and info */}
-      <div className="board-creature-overlay">
-        <div className="board-creature-stats">
-          <span className="stat-badge atk-badge">{displayAtk}</span>
-          <span className="stat-badge hp-badge">{bc.currentHp}</span>
-        </div>
-
-        {bc.hasSummoningSickness && (
-          <div className="status-indicator summoning-sickness">😴</div>
-        )}
-
-        {(bc as any).frozenForTurns > 0 && (
-          <div className="status-indicator frozen">❄️</div>
-        )}
-
-        {relicCount > 0 && (
-          <div className="relic-indicator">🎴 {relicCount}</div>
-        )}
-      </div>
-
-      {/* Action buttons */}
-      {isActiveRow && phase === "ATTACK" && !bc.hasSummoningSickness && onAttack && (
-        <div className="board-creature-actions">
-          <button onClick={(e) => { e.stopPropagation(); onAttack(slotIndex, "PLAYER"); }}>
-            Attack Player
-          </button>
-          {[0, 1, 2].map((idx) => (
-            <button key={idx} onClick={(e) => { e.stopPropagation(); onAttack(slotIndex, idx); }}>
-              Slot {idx + 1}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {isActiveRow && pendingRelic && onAttachRelic && (
-        <div className="board-creature-actions">
-          <button onClick={(e) => { e.stopPropagation(); onAttachRelic(slotIndex); }}>
-            Attach Here
-          </button>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// -----------------------------------------------------------------------------
-// Hand card
-// -----------------------------------------------------------------------------
-
-interface HandCardProps {
-  card: MainDeckCard;
-  phase: Phase;
-  isActivePlayer: boolean;
-  onSummon?: (slotIndex: number) => void;
-  onCastSpell?: () => void;
-  onPlayRelic?: () => void;
-  onPlayLocation?: () => void;
-  index: number;
-  total: number;
-  isDiscardMode?: boolean;
-  onDiscard?: (cardId: string) => void;
-  onMouseEnter?: () => void;
-}
-
-const HandCard: React.FC<HandCardProps> = ({
-  card,
-  phase,
-  isActivePlayer,
-  onSummon,
-  onCastSpell,
-  onPlayRelic,
-  onPlayLocation,
-  index,
-  total,
-  isDiscardMode,
-  onDiscard,
-  onMouseEnter,
-}) => {
-  const angleSpread = Math.min(15, 40 / Math.max(total, 1));
-  const centerIndex = (total - 1) / 2;
-  const angle = (index - centerIndex) * angleSpread;
-
-  const isCreature = card.kind === "CREATURE" || card.kind === "EVOLUTION";
-  const isSpell = card.kind === "FAST_SPELL" || card.kind === "SLOW_SPELL";
-  const isRelic = card.kind === "RELIC";
-  const isLocation = card.kind === "LOCATION";
-
-  const handleClickDiscard = () => {
-    if (isDiscardMode && onDiscard) {
-      onDiscard(card.id);
-    }
-  };
-
-  const canPlayNormally = isActivePlayer && !isDiscardMode;
-
-  return (
-    <div
-      className={`hand-card ${isDiscardMode ? "hand-card-discard-mode" : ""}`}
-      style={{
-        transform: `rotate(${angle}deg)`,
-      }}
-      onClick={isDiscardMode ? handleClickDiscard : undefined}
-      onMouseEnter={onMouseEnter}
-    >
-      {/* Card Image */}
-      {card.imagePath ? (
-        <img 
-          src={card.imagePath} 
-          alt={card.name} 
-          className="hand-card-image"
-        />
-      ) : (
-        <div className="hand-card-placeholder">
-          {card.name}
-        </div>
-      )}
-
-      {/* Action buttons overlay */}
-      {!isDiscardMode && (
-        <div className="hand-card-actions">
-          {isCreature && canPlayNormally && onSummon && (
-            <>
-              <button onClick={(e) => { e.stopPropagation(); onSummon(0); }}>L</button>
-              <button onClick={(e) => { e.stopPropagation(); onSummon(1); }}>C</button>
-              <button onClick={(e) => { e.stopPropagation(); onSummon(2); }}>R</button>
-            </>
-          )}
-
-          {isSpell && canPlayNormally && onCastSpell && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onCastSpell(); }}
-              disabled={card.kind === "SLOW_SPELL" && phase !== "MAIN"}
-            >
-              Cast
-            </button>
-          )}
-
-          {isRelic && canPlayNormally && onPlayRelic && (
-            <button onClick={(e) => { e.stopPropagation(); onPlayRelic(); }}>
-              Play
-            </button>
-          )}
-
-          {isLocation && canPlayNormally && onPlayLocation && (
-            <button onClick={(e) => { e.stopPropagation(); onPlayLocation(); }}>
-              Play
-            </button>
-          )}
-        </div>
-      )}
-
-      {isDiscardMode && (
-        <div className="hand-card-discard-hint">
-          Click to discard
-        </div>
-      )}
-    </div>
-  );
-};
-
-// -----------------------------------------------------------------------------
-// Evolution cards row
-// -----------------------------------------------------------------------------
-
-interface EvolutionCardViewProps {
-  evo: EvolutionCard;
-  player: PlayerState;
-  onTransform: (slotIndex: number) => void;
-  onDropIn: (slotIndex: number, overwriteExisting: boolean) => void;
-  onMouseEnter?: () => void;
-}
-
-const EvolutionCardView: React.FC<EvolutionCardViewProps> = ({
-  evo,
-  player,
-  onTransform,
-  onDropIn,
-  onMouseEnter,
-}) => {
-  const isTransform = evo.evoType === "TRANSFORM";
-
-  return (
-    <div 
-      className="evo-card"
-      onMouseEnter={onMouseEnter}
-    >
-      {/* Card Image */}
-      {evo.imagePath ? (
-        <img 
-          src={evo.imagePath} 
-          alt={evo.name} 
-          className="evo-card-image"
-        />
-      ) : (
-        <div className="evo-card-placeholder">
-          {evo.name}
-        </div>
-      )}
-
-      {/* Action buttons */}
-      <div className="evo-card-actions">
-        {isTransform ? (
-          <>
-            <div className="evo-card-subtitle">Transform:</div>
-            <div className="evo-card-buttons">
-              {player.board.map((bc, idx) => {
-                const disabled =
-                  !bc ||
-                  bc.card.kind !== "CREATURE" ||
-                  (bc.card as CreatureCard).name !== evo.baseName ||
-                  (bc.card as CreatureCard).rank !== evo.requiredRank;
-                return (
-                  <button
-                    key={idx}
-                    disabled={disabled}
-                    onClick={() => onTransform(idx)}
-                  >
-                    {idx + 1}
-                  </button>
-                );
-              })}
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="evo-card-subtitle">Drop-In:</div>
-            <div className="evo-card-buttons">
-              {player.board.map((bc, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => onDropIn(idx, !!bc)}
-                >
-                  {idx + 1}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
       </div>
     </div>
   );

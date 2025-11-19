@@ -5,28 +5,38 @@ import { CardEffect, TargetType } from "./cardEffects";
 import { SpellTarget } from "./engine";
 
 export class EffectExecutor {
-  executeEffect(
-    gs: GameState,
-    effect: CardEffect,
-    sourcePlayerIndex: number,
-    target?: SpellTarget
-  ): void {
-    switch (effect.timing) {
-      case "IMMEDIATE":
-        this.executeImmediateEffect(gs, effect, sourcePlayerIndex, target);
-        break;
-      case "ON_PLAY":
-        this.executeOnPlayEffect(gs, effect, sourcePlayerIndex);
-        break;
-      case "DEATH":
-        this.executeDeathEffect(gs, effect, sourcePlayerIndex);
-        break;
-      case "CATALYST":
-        this.executeCatalystEffect(gs, effect, sourcePlayerIndex);
-        break;
-      // Add other timings as needed
-    }
+executeEffect(
+  gs: GameState,
+  effect: CardEffect,
+  sourcePlayerIndex: number,
+  target?: SpellTarget
+): void {
+    console.log("effectExecutor.executeEffect called with:", {
+    effect,
+    sourcePlayerIndex,
+    target,
+    timing: effect.timing
+  });
+  
+  switch (effect.timing) {
+    case "IMMEDIATE":
+      this.executeImmediateEffect(gs, effect, sourcePlayerIndex, target);
+      break;
+    case "ON_PLAY":
+      this.executeOnPlayEffect(gs, effect, sourcePlayerIndex, target); // Pass target here!
+      break;
+          case "ON_ATTACK":  // Add this case
+      this.executeOnAttackEffect(gs, effect, sourcePlayerIndex);
+      break;
+    case "DEATH":
+      this.executeDeathEffect(gs, effect, sourcePlayerIndex);
+      break;
+    case "CATALYST":
+      this.executeCatalystEffect(gs, effect, sourcePlayerIndex);
+      break;
+    // Add other timings as needed
   }
+}
   
   private executeImmediateEffect(
     gs: GameState,
@@ -174,27 +184,61 @@ export class EffectExecutor {
     }
   }
   
-  private executeOnPlayEffect(
-    gs: GameState,
-    effect: CardEffect,
-    playerIndex: number
-  ): void {
-    const player = gs.players[playerIndex];
-    
-    if (effect.draw !== undefined && effect.draw > 0) {
-      for (let i = 0; i < effect.draw; i++) {
-        this.drawCard(player);
-      }
-      gs.log.push(`${player.name} draws ${effect.draw} card(s).`);
-    }
-    
-    if (effect.discard !== undefined && effect.discard > 0) {
-      gs.pendingDiscard = {
-        playerIndex,
-        source: "On Play",
-      };
-    }
+private executeOnPlayEffect(
+  gs: GameState,
+  effect: CardEffect,
+  playerIndex: number,
+  target?: SpellTarget
+): void {
+  const player = gs.players[playerIndex];
+  
+  // Handle damage for ON_PLAY effects
+  if (effect.damage !== undefined && target?.type === "CREATURE") {
+    this.applyDamageToCreature(
+      gs,
+      target.playerIndex,
+      target.slotIndex,
+      effect.damage,
+      false // Not from a spell
+    );
   }
+  
+  // Handle healing for ON_PLAY effects
+  if (effect.heal !== undefined && target?.type === "CREATURE") {
+    this.healCreature(gs, target.playerIndex, target.slotIndex, effect.heal, false);
+  }
+  
+  if (effect.draw !== undefined && effect.draw > 0) {
+    for (let i = 0; i < effect.draw; i++) {
+      this.drawCard(player);
+    }
+    gs.log.push(`${player.name} draws ${effect.draw} card(s).`);
+  }
+  
+  if (effect.discard !== undefined && effect.discard > 0) {
+    gs.pendingDiscard = {
+      playerIndex,
+      source: "On Play",
+    };
+  }
+}
+
+private executeOnAttackEffect(
+  gs: GameState,
+  effect: CardEffect,
+  playerIndex: number
+): void {
+  const enemy = gs.players[1 - playerIndex];
+  
+  // Handle damage to all enemy creatures
+  if (effect.damage !== undefined && effect.targetType === "ALL_ENEMY") {
+    enemy.board.forEach((bc, idx) => {
+      if (bc) {
+        this.applyDamageToCreature(gs, 1 - playerIndex, idx, effect.damage!, false);
+      }
+    });
+  }
+}
   
   private executeDeathEffect(
     gs: GameState,

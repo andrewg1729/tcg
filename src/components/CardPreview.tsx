@@ -1,7 +1,7 @@
 // src/components/CardPreview.tsx
 
 import React, { useState, useEffect } from "react";
-import { MainDeckCard, CreatureCard, EvolutionCard, BoardCreature, PlayerState } from "../game/types";
+import { MainDeckCard, CreatureCard, EvolutionCard, BoardCreature, PlayerState, GameState } from "../game/types";
 import { cardRegistry } from "../game/cardRegistry";
 import "../CardPreview.css";
 
@@ -9,6 +9,8 @@ interface CardPreviewProps {
   card: MainDeckCard | EvolutionCard | BoardCreature | null;
   playerState?: PlayerState;
   slotIndex?: number;
+  gameState?: GameState;
+  playerIndex?: number;
 }
 
 // Keyword explanations
@@ -33,7 +35,13 @@ const KEYWORD_TOOLTIPS: Record<string, string> = {
   DEATH: "Triggers an effect when this creature dies.",
 };
 
-export const CardPreview: React.FC<CardPreviewProps> = ({ card, playerState, slotIndex }) => {
+export const CardPreview: React.FC<CardPreviewProps> = ({ 
+  card, 
+  playerState, 
+  slotIndex,
+  gameState,
+  playerIndex 
+}) => {
   const [hoveredKeyword, setHoveredKeyword] = useState<string | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const [tooltipSize, setTooltipSize] = useState({ width: 0, height: 0 });
@@ -91,14 +99,53 @@ export const CardPreview: React.FC<CardPreviewProps> = ({ card, playerState, slo
   let displayAtk = isCreature ? (actualCard as any).atk : undefined;
   let displayHp = boardCreature ? boardCreature.currentHp : isCreature ? (actualCard as any).hp : undefined;
   let maxHp = isCreature ? (actualCard as any).hp : undefined;
-  let tempAtkBuff = 0;
   let relicCount = 0;
+  let conditionalBonuses = { awaken: 0, surge: 0, temp: 0 };
 
   if (boardCreature && playerState && slotIndex !== undefined) {
-    tempAtkBuff = (boardCreature as any).tempAtkBuff || 0;
-    displayAtk = (displayAtk || 0) + tempAtkBuff;
-    relicCount = playerState.relics.filter(r => r.slotIndex === slotIndex).length;
+  const baseTempBuff = (boardCreature as any).tempAtkBuff || 0;
+  
+  // Calculate relic ATK bonus
+  const relicAtkBonus = playerState.relics
+    .filter(r => r.slotIndex === slotIndex)
+    .reduce((sum, relicData) => {
+      const relicName = relicData.relic.name;
+      if (relicName === "Ember-Iron Gauntlets") return sum + 2;
+      return sum;
+    }, 0);
+  
+  // Calculate Awaken bonus
+  let awakenBonus = 0;
+  if (gameState && playerIndex !== undefined) {
+    const enemyIndex = playerIndex === 0 ? 1 : 0;
+    const hasAwaken = keywords.some(kw => kw.keyword === "AWAKEN");
+    if (hasAwaken && playerState.life < gameState.players[enemyIndex].life) {
+      awakenBonus = 1;
+    }
   }
+  
+  // Calculate Surge bonus (check if it's included in tempAtkBuff)
+  let surgeBonus = 0;
+  let nonSurgeTempBuff = baseTempBuff;
+  
+  if (gameState && playerIndex !== undefined) {
+    const surgeValue = keywords.find(kw => kw.keyword === "SURGE")?.surge || 0;
+    if (gameState.activePlayerIndex === playerIndex && surgeValue > 0) {
+      surgeBonus = surgeValue;
+      // Surge is already in tempAtkBuff, so subtract it to get non-surge temp buffs
+      nonSurgeTempBuff = baseTempBuff - surgeValue;
+    }
+  }
+  
+  conditionalBonuses = {
+    temp: nonSurgeTempBuff,
+    surge: surgeBonus,
+    awaken: awakenBonus
+  };
+  
+  displayAtk = ((actualCard as any).atk || 0) + relicAtkBonus + baseTempBuff + awakenBonus;
+  relicCount = playerState.relics.filter(r => r.slotIndex === slotIndex).length;
+}
 
   // Get granted keywords from relics
   const grantedKeywords: Array<{ keyword: string; source: string; value?: number }> = [];
@@ -227,7 +274,13 @@ export const CardPreview: React.FC<CardPreviewProps> = ({ card, playerState, slo
               <span className="stat-label">ATK:</span>
               <span className="stat-value atk-value">
                 {displayAtk}
-                {tempAtkBuff > 0 && <span className="stat-buff"> (+{tempAtkBuff})</span>}
+                {boardCreature && (
+                  <>
+                    {conditionalBonuses.temp > 0 && <span className="stat-buff"> (+{conditionalBonuses.temp} temp)</span>}
+                    {conditionalBonuses.surge > 0 && <span className="stat-buff"> (+{conditionalBonuses.surge} surge)</span>}
+                    {conditionalBonuses.awaken > 0 && <span className="stat-buff"> (+{conditionalBonuses.awaken} awaken)</span>}
+                  </>
+                )}
               </span>
             </div>
             <div className="card-preview-stat-row">
@@ -268,11 +321,6 @@ export const CardPreview: React.FC<CardPreviewProps> = ({ card, playerState, slo
               {relicCount > 0 && (
                 <div className="effect-item relics">
                   {relicCount} Relic{relicCount > 1 ? "s" : ""} Equipped
-                </div>
-              )}
-              {(boardCreature as any).tempAtkBuff > 0 && (
-                <div className="effect-item temp-buff">
-                  +{(boardCreature as any).tempAtkBuff} ATK (temporary)
                 </div>
               )}
             </div>

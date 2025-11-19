@@ -122,6 +122,22 @@ export interface PlayerState {
   spellsCastThisTurn: number;
 }
 
+export type TargetingRule = 
+  | { type: "ENEMY_CREATURES" }
+  | { type: "FRIENDLY_CREATURES" }
+  | { type: "ALL_CREATURES" }
+  | { type: "ENEMY_PLAYER" }
+  | { type: "ANY_PLAYER" }
+  | { type: "SACRIFICE"; requiredHp: number };
+
+export interface PendingTarget {
+  source: string;
+  rule: TargetingRule;
+  sourcePlayerIndex: number;
+  sourceSlotIndex?: number;
+  sourceCardId?: string;
+  sourceType: "ON_PLAY" | "SPELL" | "RELIC";  // Add RELIC here
+}
 // -----------------------------
 // Game state & phases
 // -----------------------------
@@ -149,4 +165,5 @@ export interface GameState {
   // NEW: if not null, active player must discard a card from hand
   pendingDiscard?: PendingDiscard | null;
   pendingSacrificeSummon?: PendingSacrificeSummon | null;
+  pendingTarget?: PendingTarget;
 }

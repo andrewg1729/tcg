@@ -15,7 +15,7 @@ import { cardRegistry } from "./cardRegistry";
 import { effectExecutor } from "./effectExecutor";
 
 // Small helper to deep-clone state (for functional-style updates)
-function cloneState<T>(obj: T): T {
+export function cloneState<T>(obj: T): T {
   return structuredClone(obj);
 }
 
@@ -23,13 +23,39 @@ function cloneState<T>(obj: T): T {
 // Keyword / ability helpers (now using registry)
 // ---------------------------------------------------------------------------
 
-function hasKeyword(cardName: string, keyword: string): boolean {
-  const keywords = cardRegistry.getKeywords(cardName);
+function hasKeyword(card: any, keyword: string): boolean {
+  // If card is a string (card name), look up from registry
+  if (typeof card === 'string') {
+    const keywords = cardRegistry.getKeywords(card);
+    return keywords.some(k => k.keyword === keyword);
+  }
+  
+  // If card is an object, check its keywords array first (includes relic-granted)
+  if (card.keywords) {
+    return card.keywords.some((k: any) => k.keyword === keyword);
+  }
+  
+  // Fallback to registry lookup by name
+  const keywords = cardRegistry.getKeywords(card.name);
   return keywords.some(k => k.keyword === keyword);
 }
 
-function getKeywordValue(cardName: string, keyword: string): number {
-  const keywords = cardRegistry.getKeywords(cardName);
+function getKeywordValue(card: any, keyword: string): number {
+  let keywords: any[];
+  
+  // If card is a string (card name), look up from registry
+  if (typeof card === 'string') {
+    keywords = cardRegistry.getKeywords(card);
+  } 
+  // If card is an object, check its keywords array first (includes relic-granted)
+  else if (card.keywords) {
+    keywords = card.keywords;
+  }
+  // Fallback to registry lookup by name
+  else {
+    keywords = cardRegistry.getKeywords(card.name);
+  }
+  
   const kw = keywords.find(k => k.keyword === keyword);
   
   switch (keyword) {
@@ -89,39 +115,170 @@ function hasAwaken(cardName: string): boolean {
 const WATER_LOCATION = "Tideswell Basin";
 const FIRE_LOCATION = "Molten Trail";
 
-// Relic-based modifiers (keeping existing logic for now)
-const RELIC_ARMOR_1_NAMES = new Set<string>(["Coral Bulwark"]);
-const RELIC_REGEN_1_NAMES = new Set<string>(["Moon Pearl Amulet"]);
-const RELIC_ATK_PLUS_2_NAMES = new Set<string>(["Ember-Iron Gauntlets"]);
-const RELIC_HP_PLUS_3_NAMES = new Set<string>(["Cinder Plate"]);
-
-function relicArmorBonus(player: PlayerState, slotIndex: number): number {
-  return player.relics
-    .filter(r => r.slotIndex === slotIndex && RELIC_ARMOR_1_NAMES.has(r.relic.name))
-    .length;
+function applyRelicToCreature(bc: BoardCreature, relic: RelicCard) {
+  
+  const text = relic.text;
+  const card = bc.card as any;
+  
+  // Ensure card has keywords array
+  if (!card.keywords) card.keywords = [];
+  
+  // Track what this relic added (for removal later)
+  if (!card.relicAddedKeywords) card.relicAddedKeywords = [];
+  if (!card.relicAddedStats) card.relicAddedStats = { atk: 0, hp: 0 };
+  
+  // Parse stat bonuses: "+X ATK" or "+X HP"
+  if (text.startsWith('+')) {
+    const atkMatch = text.match(/\+(\d+)\s*ATK/i);
+    const hpMatch = text.match(/\+(\d+)\s*HP/i);
+    
+    if (atkMatch) {
+      const bonus = parseInt(atkMatch[1]);
+      card.atk = (card.atk || 0) + bonus;
+      card.relicAddedStats.atk += bonus;
+    }
+    if (hpMatch) {
+      const bonus = parseInt(hpMatch[1]);
+      card.hp = (card.hp || 0) + bonus;
+      bc.currentHp += bonus;
+      card.relicAddedStats.hp += bonus;
+    }
+  }
+  
+  // Parse granted keywords: "Grant X"
+  if (text.startsWith('Grant')) {
+    const grantMatch = text.match(/Grant\s+(.+?)(?:\.|$)/i);
+    
+    if (grantMatch) {
+      const grantedEffect = grantMatch[1].trim();
+      
+      // Keyword with value (e.g., "Armor 2", "Regen 1")
+      const keywordWithValueMatch = grantedEffect.match(/^(\w+(?:\s+\w+)?)\s+(\d+)$/);
+      // Keyword without value (e.g., "Double Strike", "Guard")
+      const keywordOnlyMatch = grantedEffect.match(/^(\w+(?:\s+\w+)?)$/);
+      
+      if (keywordWithValueMatch) {
+        const keyword = keywordWithValueMatch[1].toUpperCase().replace(/\s+/g, '_');
+        const value = parseInt(keywordWithValueMatch[2]);
+                
+        const keywordObj: any = { keyword };
+        if (keyword === "ARMOR") keywordObj.armor = value;
+        else if (keyword === "REGEN") keywordObj.regen = value;
+        else if (keyword === "SURGE") keywordObj.surge = value;
+        
+        card.keywords.push(keywordObj);
+        card.relicAddedKeywords.push(keywordObj);
+      } else if (keywordOnlyMatch) {
+        const keyword = keywordOnlyMatch[1].toUpperCase().replace(/\s+/g, '_');
+        
+        const keywordObj = { keyword };
+        card.keywords.push(keywordObj);
+        card.relicAddedKeywords.push(keywordObj);
+      }
+    }
+  }
+  
 }
 
-function relicRegenBonus(player: PlayerState, slotIndex: number): number {
-  return player.relics
-    .filter(
-      (r) =>
-        r.slotIndex === slotIndex &&
-        r.relic &&
-        RELIC_REGEN_1_NAMES.has(r.relic.name)
-    )
-    .length;
+function removeAllRelicsFromCreature(bc: BoardCreature) {
+  const card = bc.card as any;
+  
+  if (card.relicAddedStats) {
+    card.atk = (card.atk || 0) - card.relicAddedStats.atk;
+    card.hp = (card.hp || 0) - card.relicAddedStats.hp;
+    bc.currentHp = Math.max(1, bc.currentHp - card.relicAddedStats.hp);
+    card.relicAddedStats = { atk: 0, hp: 0 };
+  }
+  
+  if (card.relicAddedKeywords) {
+    card.relicAddedKeywords.forEach((kw: any) => {
+      const index = card.keywords.findIndex((k: any) => k.keyword === kw.keyword);
+      if (index !== -1) card.keywords.splice(index, 1);
+    });
+    card.relicAddedKeywords = [];
+  }
 }
 
-function relicAtkBonus(player: PlayerState, slotIndex: number): number {
-  return player.relics
-    .filter(r => r.slotIndex === slotIndex && RELIC_ATK_PLUS_2_NAMES.has(r.relic.name))
-    .length * 2;
+// Check if a target is valid based on the rule
+export function isValidTarget(
+  state: GameState,
+  rule: TargetingRule,
+  targetPlayerIndex: number,
+  targetSlotIndex?: number
+): boolean {
+  const activePlayerIndex = state.activePlayerIndex;
+  const enemyIndex = activePlayerIndex === 0 ? 1 : 0;
+
+  switch (rule.type) {
+    case "ENEMY_CREATURES":
+      return targetPlayerIndex === enemyIndex && 
+             targetSlotIndex !== undefined && 
+             state.players[targetPlayerIndex].board[targetSlotIndex] !== null;
+    
+    case "FRIENDLY_CREATURES":
+      return targetPlayerIndex === activePlayerIndex && 
+             targetSlotIndex !== undefined && 
+             state.players[targetPlayerIndex].board[targetSlotIndex] !== null;
+    
+    case "ALL_CREATURES":
+      return targetSlotIndex !== undefined && 
+             state.players[targetPlayerIndex].board[targetSlotIndex] !== null;
+    
+    case "ENEMY_PLAYER":
+      return targetPlayerIndex === enemyIndex && targetSlotIndex === undefined;
+    
+    case "ANY_PLAYER":
+      return targetSlotIndex === undefined;
+    
+    case "SACRIFICE":
+      // For sacrifice targeting, we check if the creature exists
+      return targetPlayerIndex === activePlayerIndex && 
+             targetSlotIndex !== undefined && 
+             state.players[targetPlayerIndex].board[targetSlotIndex] !== null;
+    
+    default:
+      return false;
+  }
 }
 
-function relicHpBonus(player: PlayerState, slotIndex: number): number {
-  return player.relics
-    .filter(r => r.slotIndex === slotIndex && RELIC_HP_PLUS_3_NAMES.has(r.relic.name))
-    .length * 3;
+// Get all valid target slots for a given rule
+export function getValidTargets(
+  state: GameState,
+  rule: TargetingRule
+): Array<{ playerIndex: number; slotIndex: number }> {
+  const validTargets: Array<{ playerIndex: number; slotIndex: number }> = [];
+  
+  if (rule.type === "ENEMY_PLAYER" || rule.type === "ANY_PLAYER") {
+    // Player targeting doesn't return slot-based targets
+    return [];
+  }
+
+  const activePlayerIndex = state.activePlayerIndex;
+  const enemyIndex = activePlayerIndex === 0 ? 1 : 0;
+
+  const checkPlayer = (pIdx: number) => {
+    state.players[pIdx].board.forEach((bc, slotIdx) => {
+      if (isValidTarget(state, rule, pIdx, slotIdx)) {
+        validTargets.push({ playerIndex: pIdx, slotIndex: slotIdx });
+      }
+    });
+  };
+
+  switch (rule.type) {
+    case "ENEMY_CREATURES":
+      checkPlayer(enemyIndex);
+      break;
+    case "FRIENDLY_CREATURES":
+    case "SACRIFICE":
+      checkPlayer(activePlayerIndex);
+      break;
+    case "ALL_CREATURES":
+      checkPlayer(0);
+      checkPlayer(1);
+      break;
+  }
+
+  return validTargets;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,36 +303,30 @@ function getEffectiveAtk(state: GameState, playerIndex: number, slotIndex: numbe
   const baseAtk = (bc.card as any).atk || 0;
   const name = bc.card.name;
 
-  const relicBonus = relicAtkBonus(player, slotIndex);
   const tempBuff = (bc as any).tempAtkBuff || 0;
 
   const awakenBonus = hasAwaken(name) && player.life < state.players[1 - playerIndex].life ? 1 : 0;
   
-  // Surge: +X ATK on owner's turn only
-  const surgeValue = getKeywordValue(name, "SURGE");
-  const surgeBonus = (state.activePlayerIndex === playerIndex && surgeValue > 0) ? surgeValue : 0;
+  // Surge is already applied to tempAtkBuff at start of turn, don't double count!
 
-  return baseAtk + relicBonus + tempBuff + surgeBonus + awakenBonus;
+  return baseAtk + tempBuff + awakenBonus;
 }
 
 function getArmor(state: GameState, playerIndex: number, slotIndex: number): number {
   const player = state.players[playerIndex];
   const bc = player.board[slotIndex];
   if (!bc) return 0;
-  const cardName = bc.card.name;
-  const base = baseArmor(cardName);
-  const relicBonus = relicArmorBonus(player, slotIndex);
-  return base + relicBonus;
+  
+  return getKeywordValue(bc.card, "ARMOR");
 }
 
-function getRegen(state: GameState, playerIndex: number, slotIndex: number): number {
-  const player = state.players[playerIndex];
+function getRegen(gs: GameState, playerIndex: number, slotIndex: number): number {
+  const player = gs.players[playerIndex];
   const bc = player.board[slotIndex];
   if (!bc) return 0;
-  const cardName = bc.card.name;
-  const base = baseRegen(cardName);
-  const relicBonus = relicRegenBonus(player, slotIndex);
-  return base + relicBonus;
+  
+  const value = getKeywordValue(bc.card, "REGEN");
+  return value;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,15 +419,15 @@ function startTurn(gs: GameState): void {
     bc.hasSummoningSickness = false;
     (bc as any).attacksThisTurn = 0;
 
-    // Regen
-    const regen = getRegen(gs, gs.activePlayerIndex, idx);
-    if (regen > 0) {
-      bc.currentHp = Math.min(
-        bc.currentHp + regen,
-        (bc.card as any).hp + relicHpBonus(current, idx)
-      );
-      gs.log.push(`${bc.card.name} regenerates ${regen} HP.`);
-    }
+const regen = getRegen(gs, gs.activePlayerIndex, idx);
+
+if (regen > 0) {
+bc.currentHp = Math.min(
+  bc.currentHp + regen,
+  (bc.card as any).hp
+);
+  gs.log.push(`${bc.card.name} regenerates ${regen} HP.`);
+}
 
     // Surge - apply temporary ATK buff
     const surgeValue = getKeywordValue(bc.card.name, "SURGE");
@@ -324,27 +475,31 @@ export function endPhase(state: GameState): GameState {
   } else if (p === "ATTACK") {
     gs.phase = "END";
   } else if (p === "END") {
-    // Remove Surge buffs at end of turn
-    const current = gs.players[gs.activePlayerIndex];
-    current.board.forEach((bc) => {
-      if (!bc) return;
-      ensureRuntimeFields(bc);
-      const surgeValue = getKeywordValue(bc.card.name, "SURGE");
-      if (surgeValue > 0) {
-        (bc as any).tempAtkBuff = Math.max(0, ((bc as any).tempAtkBuff || 0) - surgeValue);
-      }
-    });
+  const current = gs.players[gs.activePlayerIndex];
+  
+  // Clear all temporary "until end of turn" buffs
+  current.board.forEach((bc) => {
+    if (!bc) return;
+    ensureRuntimeFields(bc);
+    
+    // Reset all temporary ATK buffs (from spells, surge, etc.)
+    (bc as any).tempAtkBuff = 0;
+    
+    // Clear any other temporary buffs here as needed
+    // preventedDamage stays (it's consumed, not time-based)
+    // frozenForTurns decrements at start of turn, not end
+  });
 
-    // Turn passes to other player
-    gs.turnNumber += 1;
-    gs.activePlayerIndex = gs.activePlayerIndex === 0 ? 1 : 0;
+  // Turn passes to other player
+  gs.turnNumber += 1;
+  gs.activePlayerIndex = gs.activePlayerIndex === 0 ? 1 : 0;
 
-    // Start of turn: draw + upkeep
-    startTurn(gs);
+  // Start of turn: draw + upkeep (this will re-apply Surge for the new turn)
+  startTurn(gs);
 
-    // Immediately move to MAIN
-    gs.phase = "MAIN";
-  }
+  // Immediately move to MAIN
+  gs.phase = "MAIN";
+}
 
   return gs;
 }
@@ -634,6 +789,162 @@ function applySpellShield(bc: BoardCreature) {
   }
 }
 
+export function resolveSpellTargeting(
+  state: GameState,
+  spellCardId?: string,
+  target?: SpellTarget
+): GameState {
+  const gs = cloneState(state);
+  
+  // If we're setting up targeting (no target provided yet)
+  if (spellCardId && !target) {
+    const player = gs.players[gs.activePlayerIndex];
+    const card = player.hand.find(c => c.id === spellCardId);
+    
+    if (!card || (card.kind !== "FAST_SPELL" && card.kind !== "SLOW_SPELL")) {
+      return gs;
+    }
+    
+    // Get effects from card registry
+    const effects = cardRegistry.getEffects(card.name);
+    
+    // Determine if targeting is needed based on effect targetType
+    const needsTarget = effects.some(e => 
+      e.targetType === "TARGET_CREATURE" || 
+      e.targetType === "TARGET_PLAYER"
+    );
+    
+    if (!needsTarget) {
+      // No targeting needed, cast immediately
+      effects.forEach(effect => {
+        effectExecutor.executeEffect(gs, effect, gs.activePlayerIndex, undefined);
+      });
+      
+      // Remove from hand and add to graveyard
+      player.hand = player.hand.filter(c => c.id !== spellCardId);
+      player.graveyard.push(card);
+      markSpellCastAndTriggerCatalyst(gs, gs.activePlayerIndex);
+      
+      return gs;
+    }
+    
+    // Determine targeting rule from effects
+    let rule: TargetingRule;
+    
+    const firstTargetingEffect = effects.find(e => 
+      e.targetType === "TARGET_CREATURE" || e.targetType === "TARGET_PLAYER"
+    );
+    
+    if (firstTargetingEffect?.targetType === "TARGET_CREATURE") {
+      if (firstTargetingEffect.customScript === "ENEMY_ONLY") {
+        rule = { type: "ENEMY_CREATURES" };
+      } else if (firstTargetingEffect.customScript === "FRIENDLY_ONLY") {
+        rule = { type: "FRIENDLY_CREATURES" };
+      } else {
+        rule = { type: "ALL_CREATURES" };
+      }
+    } else if (firstTargetingEffect?.targetType === "TARGET_PLAYER") {
+      if (firstTargetingEffect.customScript === "ENEMY_ONLY") {
+        rule = { type: "ENEMY_PLAYER" };
+      } else {
+        rule = { type: "ANY_PLAYER" };
+      }
+    } else {
+      rule = { type: "ALL_CREATURES" };
+    }
+    
+    gs.pendingTarget = {
+      source: card.name,
+      rule,
+      sourcePlayerIndex: gs.activePlayerIndex,
+      sourceCardId: spellCardId,
+      sourceType: "SPELL",
+    };
+    
+    gs.log.push(`${card.name} needs a target. Click a valid target.`);
+    return gs;
+  }
+  
+  // If we're resolving targeting (target provided)
+  if (!gs.pendingTarget || gs.pendingTarget.sourceType !== "SPELL" || !target) {
+    return gs;
+  }
+  
+  const { sourcePlayerIndex, sourceCardId, source } = gs.pendingTarget;
+  
+  if (!sourceCardId) {
+    gs.pendingTarget = undefined;
+    return gs;
+  }
+  
+  const player = gs.players[sourcePlayerIndex];
+  const card = player.hand.find(c => c.id === sourceCardId);
+  
+  if (!card) {
+    gs.pendingTarget = undefined;
+    return gs;
+  }
+  
+  // Execute the spell with the target
+  const effects = cardRegistry.getEffects(source);
+  effects.forEach(effect => {
+    effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, target);
+  });
+  
+  // Remove spell from hand BEFORE clearing pendingTarget
+  player.hand = player.hand.filter(c => c.id !== sourceCardId);
+  player.graveyard.push(card);
+  
+  markSpellCastAndTriggerCatalyst(gs, sourcePlayerIndex);
+  
+  // Clear pending target
+  gs.pendingTarget = undefined;
+  
+  return gs;
+}
+
+export function resolveRelicTargeting(
+  state: GameState,
+  targetSlotIndex: number
+): GameState {
+  const gs = cloneState(state);
+  
+  if (!gs.pendingTarget || gs.pendingTarget.sourceType !== "RELIC") {
+    return gs;
+  }
+  
+  const { sourcePlayerIndex, sourceCardId } = gs.pendingTarget;
+  
+  if (!sourceCardId) {
+    gs.pendingTarget = undefined;
+    return gs;
+  }
+  
+  // Use the existing playRelic function
+  const result = playRelic(gs, sourceCardId, targetSlotIndex);
+  
+  // Clear pending target
+  result.pendingTarget = undefined;
+  
+  return result;
+}
+
+function markSpellCastAndTriggerCatalyst(gs: GameState, playerIndex: number) {
+  const player = gs.players[playerIndex];
+  player.spellsCastThisTurn += 1;
+
+  if (player.spellsCastThisTurn === 1) {
+    player.board.forEach((bc, slotIdx) => {
+      if (!bc) return;
+      const effects = cardRegistry.getEffects(bc.card.name);
+      const catalystEffects = effects.filter(e => e.timing === "CATALYST");
+      catalystEffects.forEach(eff => {
+        effectExecutor.executeEffect(gs, eff, playerIndex, undefined);
+      });
+    });
+  }
+}
+
 function triggerOnPlayEffects(gs: GameState, playerIndex: number, slotIndex: number) {
   const player = gs.players[playerIndex];
   const bc = player.board[slotIndex];
@@ -642,9 +953,83 @@ function triggerOnPlayEffects(gs: GameState, playerIndex: number, slotIndex: num
   const effects = cardRegistry.getEffects(bc.card.name);
   const onPlayEffects = effects.filter(e => e.timing === "ON_PLAY");
   
+  // Check if any effects need targeting based on targetType
+  const targetingEffect = onPlayEffects.find(e => 
+    e.targetType === "TARGET_CREATURE" || e.targetType === "TARGET_PLAYER"
+  );
+  
+  if (targetingEffect) {
+    // Determine targeting rule from effect
+    let rule: TargetingRule;
+    
+    if (targetingEffect.targetType === "TARGET_CREATURE") {
+      if (targetingEffect.customScript === "ENEMY_ONLY") {
+        rule = { type: "ENEMY_CREATURES" };
+      } else if (targetingEffect.customScript === "FRIENDLY_ONLY") {
+        rule = { type: "FRIENDLY_CREATURES" };
+      } else {
+        rule = { type: "ALL_CREATURES" };
+      }
+    } else if (targetingEffect.targetType === "TARGET_PLAYER") {
+      if (targetingEffect.customScript === "ENEMY_ONLY") {
+        rule = { type: "ENEMY_PLAYER" };
+      } else {
+        rule = { type: "ANY_PLAYER" };
+      }
+    } else {
+      rule = { type: "ENEMY_CREATURES" };
+    }
+    
+    gs.pendingTarget = {
+      source: bc.card.name,
+      rule,
+      sourcePlayerIndex: playerIndex,
+      sourceSlotIndex: slotIndex,
+      sourceType: "ON_PLAY",
+    };
+    gs.log.push(`${bc.card.name} needs a target. Click a valid target.`);
+  } else {
+    // Execute non-targeting effects immediately
+    onPlayEffects.forEach(effect => {
+      effectExecutor.executeEffect(gs, effect, playerIndex, undefined);
+    });
+  }
+}
+
+export function resolveOnPlayTargeting(
+  state: GameState,
+  targetPlayerIndex: number,
+  targetSlotIndex: number
+): GameState {
+  const gs = cloneState(state);
+  
+  if (!gs.pendingTarget) return gs;
+  
+  const { sourcePlayerIndex, sourceSlotIndex, source } = gs.pendingTarget;
+  const player = gs.players[sourcePlayerIndex];
+  const bc = player.board[sourceSlotIndex];
+  
+  if (!bc) {
+    gs.pendingTarget = undefined;
+    return gs;
+  }
+  
+  const effects = cardRegistry.getEffects(source);
+  const onPlayEffects = effects.filter(e => e.timing === "ON_PLAY");
+
+  
+  const target: SpellTarget = {
+    type: "CREATURE",
+    playerIndex: targetPlayerIndex,
+    slotIndex: targetSlotIndex
+  };
+  
   onPlayEffects.forEach(effect => {
-    effectExecutor.executeEffect(gs, effect, playerIndex, undefined);
+    effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, target);
   });
+  
+  gs.pendingTarget = undefined;
+  return gs;
 }
 
 function triggerDeathEffects(gs: GameState, playerIndex: number, slotIndex: number) {
@@ -656,6 +1041,20 @@ function triggerDeathEffects(gs: GameState, playerIndex: number, slotIndex: numb
   const deathEffects = effects.filter(e => e.timing === "DEATH");
   
   deathEffects.forEach(effect => {
+    effectExecutor.executeEffect(gs, effect, playerIndex, undefined);
+  });
+}
+
+function triggerOnAttackEffects(gs: GameState, playerIndex: number, slotIndex: number) {
+  const player = gs.players[playerIndex];
+  const bc = player.board[slotIndex];
+  if (!bc) return;
+
+  const effects = cardRegistry.getEffects(bc.card.name);
+  const onAttackEffects = effects.filter(e => e.timing === "ON_ATTACK");
+  
+  // Execute all ON_ATTACK effects
+  onAttackEffects.forEach(effect => {
     effectExecutor.executeEffect(gs, effect, playerIndex, undefined);
   });
 }
@@ -819,6 +1218,9 @@ export function attack(
     }
   }
 
+  // Trigger ON_ATTACK effects BEFORE combat damage
+  triggerOnAttackEffects(gs, atkPlayerIndex, attackerSlotIndex);
+
   const attackerAtk = getEffectiveAtk(gs, atkPlayerIndex, attackerSlotIndex);
 
   if (target.slotIndex === "PLAYER") {
@@ -846,50 +1248,70 @@ export function attack(
   }
 
   // Creature vs creature combat
-  const defSlot = target.slotIndex as number;
-  const defender = defenderPlayer.board[defSlot];
-  if (!defender) {
-    gs.log.push(`No defender in that slot.`);
-    return gs;
-  }
-  ensureRuntimeFields(defender);
+const defSlot = target.slotIndex as number;
+const defender = defenderPlayer.board[defSlot];
+if (!defender) {
+  gs.log.push(`No defender in that slot.`);
+  return gs;
+}
+ensureRuntimeFields(defender);
 
-  const defenderAtk = getEffectiveAtk(gs, defPlayerIndex, defSlot);
-  const attackerName = attacker.card.name;
-  const defenderName = defender.card.name;
+const defenderAtk = getEffectiveAtk(gs, defPlayerIndex, defSlot);
+const attackerName = attacker.card.name;
+const defenderName = defender.card.name;
 
-  const attackerFirst = hasFirstStrike(attackerName);
-  const defenderFirst = hasFirstStrike(defenderName);
+const attackerFirst = hasFirstStrike(attackerName);
+const defenderFirst = hasFirstStrike(defenderName);
+const attackerHasPiercing = hasPiercing(attackerName); // Add this
 
-  const attackerHitsFirst = attackerFirst && !defenderFirst;
-  const defenderHitsFirst = defenderFirst && !attackerFirst;
+const attackerHitsFirst = attackerFirst && !defenderFirst;
+const defenderHitsFirst = defenderFirst && !attackerFirst;
 
-  function dealCombatDamageToDefender(amount: number) {
-    applyCreatureDamage(gs, defPlayerIndex, defSlot, amount, false);
-  }
-
-  function dealCombatDamageToAttacker(amount: number) {
-    applyCreatureDamage(gs, atkPlayerIndex, attackerSlotIndex, amount, false);
-  }
-
-  if (attackerHitsFirst) {
-    dealCombatDamageToDefender(attackerAtk);
-    if (!defenderPlayer.board[defSlot]) {
-      gs.log.push(`${attackerName} (First Strike) kills ${defenderName} before it can strike back.`);
-    } else {
-      dealCombatDamageToAttacker(defenderAtk);
+function dealCombatDamageToDefender(amount: number) {
+  const defenderHpBefore = defender.currentHp;
+  
+  applyCreatureDamage(gs, defPlayerIndex, defSlot, amount, false);
+  
+  // Check for Piercing - if defender died, deal excess to player
+  if (attackerHasPiercing) {
+    const defenderAfter = defenderPlayer.board[defSlot];
+    if (!defenderAfter) {
+      // Defender died - calculate excess damage
+      const excessDamage = amount - defenderHpBefore;
+      if (excessDamage > 0) {
+        defenderPlayer.life -= excessDamage;
+        gs.log.push(`Piercing: ${excessDamage} excess damage dealt to ${defenderPlayer.name}.`);
+      }
     }
-  } else if (defenderHitsFirst) {
+  }
+}
+
+function dealCombatDamageToAttacker(amount: number) {
+  applyCreatureDamage(gs, atkPlayerIndex, attackerSlotIndex, amount, false);
+}
+
+// Apply combat damage based on first strike
+if (attackerHitsFirst) {
+  dealCombatDamageToDefender(attackerAtk);
+  if (!defenderPlayer.board[defSlot]) {
+    gs.log.push(`${attackerName} (First Strike) kills ${defenderName} before it can strike back.`);
+  } else {
     dealCombatDamageToAttacker(defenderAtk);
-    if (!attackerPlayer.board[attackerSlotIndex]) {
-      gs.log.push(`${defenderName} (First Strike) kills ${attackerName} before it can strike back.`);
-    } else {
-      dealCombatDamageToDefender(attackerAtk);
-    }
+  }
+} else if (defenderHitsFirst) {
+  dealCombatDamageToAttacker(defenderAtk);
+  if (!attackerPlayer.board[attackerSlotIndex]) {
+    gs.log.push(`${defenderName} (First Strike) kills ${attackerName} before it can strike back.`);
+    // Even if attacker dies, piercing still applies if defender was killed
   } else {
     dealCombatDamageToDefender(attackerAtk);
-    dealCombatDamageToAttacker(defenderAtk);
   }
+} else {
+  // Simultaneous damage - apply defender damage first so piercing can check
+  dealCombatDamageToDefender(attackerAtk);
+  dealCombatDamageToAttacker(defenderAtk);
+  // Piercing already applied in dealCombatDamageToDefender, even if attacker dies after
+}
 
   bcAny.attacksThisTurn += 1;
 
@@ -971,38 +1393,86 @@ function triggerDrawThenDiscardChoice(
   );
 }
 
-function markSpellCastAndTriggerCatalyst(gs: GameState, playerIndex: number) {
-  const player = gs.players[playerIndex];
-
-  player.spellsCastThisTurn = (player.spellsCastThisTurn ?? 0) + 1;
-
-  if (player.spellsCastThisTurn === 1) {
-    handleFirstSpellThisTurn(gs, playerIndex);
-  }
-}
-
-export function castSpell(state: GameState, handCardId: string, target: SpellTarget): GameState {
+export function castSpell(state: GameState, handCardId: string, target?: SpellTarget): GameState {
+  console.log("=== castSpell called ===");
+  console.log("handCardId:", handCardId);
+  console.log("target:", target);
+  
   const gs = cloneState(state);
   const player = gs.players[gs.activePlayerIndex];
   const card = player.hand.find(c => c.id === handCardId);
   
+  console.log("Found card:", card?.name);
+  
   if (!card || (card.kind !== "FAST_SPELL" && card.kind !== "SLOW_SPELL")) {
+    console.log("Not a valid spell card, returning");
     return gs;
   }
 
-  // Get effects from registry and execute them
   const effects = cardRegistry.getEffects(card.name);
+  console.log("Effects from registry:", effects);
+  console.log("Number of effects:", effects.length);
   
-  effects.forEach(effect => {
-    effectExecutor.executeEffect(gs, effect, gs.activePlayerIndex, target);
+  const needsTarget = effects.some(e => e.targetType !== "NONE");
+  console.log("Needs target:", needsTarget);
+
+  if (needsTarget && !target) {
+    console.log("No target provided, setting up pendingTarget");
+    // Determine targeting rule based on effect
+    const effect = effects[0]; // For simplicity, use first effect's targeting
+    let rule: TargetingRule;
+    
+    if (effect.targetType === "TARGET_CREATURE") {
+      rule = { type: "ALL_CREATURES" }; // Adjust based on card
+    } else if (effect.targetType === "TARGET_PLAYER") {
+      rule = { type: "ANY_PLAYER" };
+    } else {
+      rule = { type: "ALL_CREATURES" };
+    }
+
+    gs.pendingTarget = {
+      source: card.name,
+      rule,
+      onResolve: (state: GameState, tgt: SpellTarget | number[]) => {
+        return castSpell(state, handCardId, tgt as SpellTarget);
+      }
+    };
+    gs.log.push(`${card.name} needs a target.`);
+    return gs;
+  }
+
+  console.log("Executing effects...");
+  // Execute each effect with appropriate target
+  effects.forEach((effect, index) => {
+    console.log(`\n--- Processing effect ${index} ---`);
+    console.log("Effect:", effect);
+    console.log("Effect targetType:", effect.targetType);
+    
+    if (effect.targetType === "TARGET_PLAYER") {
+      console.log("✓ Detected TARGET_PLAYER, targeting enemy");
+      const enemyPlayerIndex = 1 - gs.activePlayerIndex;
+      console.log("Enemy player index:", enemyPlayerIndex);
+      const enemyTarget = {
+        playerIndex: enemyPlayerIndex,
+        slotIndex: "PLAYER" as const
+      };
+      console.log("Calling executeEffect with enemy target:", enemyTarget);
+      effectExecutor.executeEffect(gs, effect, gs.activePlayerIndex, enemyTarget);
+    } else {
+      console.log("✗ Not TARGET_PLAYER, using provided target");
+      console.log("Provided target:", target);
+      effectExecutor.executeEffect(gs, effect, gs.activePlayerIndex, target);
+    }
   });
 
+  console.log("Moving spell to graveyard");
   // Move spell to graveyard
   player.hand = player.hand.filter(c => c.id !== card.id);
   player.graveyard.push(card);
 
   markSpellCastAndTriggerCatalyst(gs, gs.activePlayerIndex);
 
+  console.log("=== castSpell complete ===\n");
   return gs;
 }
 
@@ -1010,44 +1480,33 @@ export function castSpell(state: GameState, handCardId: string, target: SpellTar
 // RELICS
 // ---------------------------------------------------------------------------
 
-export function playRelic(state: GameState, handCardId: string, slotIndex: number): GameState {
+export function playRelic(state: GameState, relicCardId: string, targetSlotIndex: number): GameState {
   const gs = cloneState(state);
   const player = gs.players[gs.activePlayerIndex];
-  const card = player.hand.find((c) => c.id === handCardId);
-
-  if (!card || card.kind !== "RELIC") return gs;
-
-  const bc = player.board[slotIndex];
-  if (!bc) {
-    gs.log.push("No creature in that slot to attach a relic to.");
+  
+  const relicCard = player.hand.find(c => c.id === relicCardId);
+  if (!relicCard || relicCard.kind !== "RELIC") return gs;
+  
+  const target = player.board[targetSlotIndex];
+  if (!target) {
+    gs.log.push("No creature in that slot to attach the relic.");
     return gs;
   }
-
-  ensureRuntimeFields(bc);
-
-  const relic = card as RelicCard;
-
-  // Apply relic effects by name (keeping legacy logic for now)
-  if (relic.name === "Coral Bulwark") {
-    (bc as any).armor = ((bc as any).armor ?? 0) + 1;
-    gs.log.push(`${bc.card.name} gains Armor 1 from Coral Bulwark.`);
-  } else if (relic.name === "Moon Pearl Amulet") {
-    (bc as any).regen = ((bc as any).regen ?? 0) + 1;
-    gs.log.push(`${bc.card.name} gains Regen 1 from Moon Pearl Amulet.`);
-  } else if (relic.name === "Ember-Iron Gauntlets") {
-    (bc as any).permanentAtkBonus = ((bc as any).permanentAtkBonus ?? 0) + 2;
-    gs.log.push(`${bc.card.name} gains +2 ATK from Ember-Iron Gauntlets.`);
-  } else if (relic.name === "Cinder Plate") {
-    (bc as any).hpBonus = ((bc as any).hpBonus ?? 0) + 3;
-    bc.currentHp += 3;
-    gs.log.push(`${bc.card.name} gains +3 HP from Cinder Plate.`);
-  }
-
-  player.relics.push({ relic, slotIndex });
-  player.hand = player.hand.filter((c) => c.id !== card.id);
-
+  
+  applyRelicToCreature(target, relicCard as RelicCard);
+  
+  player.relics.push({
+    relic: relicCard as RelicCard,
+    slotIndex: targetSlotIndex,
+  });
+  
+  player.hand = player.hand.filter(c => c.id !== relicCardId);
+  
+  gs.log.push(`${relicCard.name} attached to ${target.card.name}.`);
+  
+  // ADD THIS LINE:
   markSpellCastAndTriggerCatalyst(gs, gs.activePlayerIndex);
-
+  
   return gs;
 }
 
