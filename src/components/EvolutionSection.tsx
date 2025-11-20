@@ -6,7 +6,6 @@ import { EvolutionCardView } from "./EvolutionCardView";
 interface EvolutionSectionProps {
   evolutions: EvolutionCard[];
   player: PlayerState;
-  onTransform: (evo: EvolutionCard, slotIndex: number) => void;
   onDropIn: (evo: EvolutionCard, slotIndex: number, overwrite: boolean) => void;
   onMouseEnter: (evo: EvolutionCard) => void;
 }
@@ -14,7 +13,6 @@ interface EvolutionSectionProps {
 export const EvolutionSection: React.FC<EvolutionSectionProps> = ({
   evolutions,
   player,
-  onTransform,
   onDropIn,
   onMouseEnter,
 }) => {
@@ -27,7 +25,6 @@ export const EvolutionSection: React.FC<EvolutionSectionProps> = ({
             key={evo.id}
             evo={evo}
             player={player}
-            onTransform={(slotIndex) => onTransform(evo, slotIndex)}
             onDropIn={(slotIndex, overwrite) => onDropIn(evo, slotIndex, overwrite)}
             onMouseEnter={() => onMouseEnter(evo)}
           />

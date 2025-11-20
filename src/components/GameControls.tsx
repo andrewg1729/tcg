@@ -6,12 +6,14 @@ interface GameControlsProps {
   phase: Phase;
   log: string[];
   onEndPhase: () => void;
+  onCancelTarget?: () => void;
 }
 
 export const GameControls: React.FC<GameControlsProps> = ({
   phase,
   log,
   onEndPhase,
+  onCancelTarget,
 }) => {
   return (
     <section className="controls-log">
@@ -19,6 +21,11 @@ export const GameControls: React.FC<GameControlsProps> = ({
         <button className="end-phase-btn" onClick={onEndPhase}>
           End Phase
         </button>
+        {onCancelTarget && (
+          <button className="cancel-target-btn" onClick={onCancelTarget}>
+            Cancel
+          </button>
+        )}
         <div className="phase-indicator">
           Current phase: <strong>{phase}</strong>
         </div>

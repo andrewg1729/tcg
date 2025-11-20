@@ -254,9 +254,20 @@ export function getValidTargets(
 
   const checkPlayer = (pIdx: number) => {
     state.players[pIdx].board.forEach((bc, slotIdx) => {
-      if (isValidTarget(state, rule, pIdx, slotIdx)) {
-        validTargets.push({ playerIndex: pIdx, slotIndex: slotIdx });
+      if (!bc) return;
+      
+      // Check if basic targeting rules allow this target
+      if (!isValidTarget(state, rule, pIdx, slotIdx)) return;
+      
+      // Filter out enemy creatures with Spell Shield (for enemy spells only)
+      const isEnemyCreature = pIdx !== activePlayerIndex;
+      const hasSpellShield = hasKeyword(bc.card, "SPELL_SHIELD");
+      
+      if (isEnemyCreature && hasSpellShield) {
+        return; // Skip this creature - it has Spell Shield
       }
+      
+      validTargets.push({ playerIndex: pIdx, slotIndex: slotIdx });
     });
   };
 
@@ -275,6 +286,27 @@ export function getValidTargets(
   }
 
   return validTargets;
+}
+
+export function cancelPendingTarget(state: GameState): GameState {
+  const gs = cloneState(state);
+  
+  if (gs.pendingTarget && gs.pendingTarget.sourceType === "SPELL" && gs.pendingTarget.sourceCardId) {
+    // Return the spell card to hand
+    const player = gs.players[gs.pendingTarget.sourcePlayerIndex];
+    const card = player.graveyard.find(c => c.id === gs.pendingTarget!.sourceCardId);
+    
+    if (card) {
+      player.graveyard = player.graveyard.filter(c => c.id !== gs.pendingTarget!.sourceCardId);
+      player.hand.push(card as any);
+      gs.log.push(`${card.name} returned to hand.`);
+    }
+  }
+  
+  // Clear the pending target
+  gs.pendingTarget = undefined;
+  
+  return gs;
 }
 
 // ---------------------------------------------------------------------------
@@ -675,6 +707,15 @@ export function summonWithChosenSacrifices(
 
   if (targetSlot < 0 || targetSlot > 2) return gs;
 
+    // Check if any sacrifice creatures are frozen
+  for (const slotIndex of sacrificeSlots) {
+    const bc = player.board[slotIndex];
+    if (bc && (bc as any).frozenForTurns > 0) {
+      gs.log.push(`${bc.card.name} is Frozen and cannot be sacrificed.`);
+      return gs;
+    }
+  }
+
   const card = player.hand.find((c) => c.id === handCardId);
   if (!card || card.kind !== "CREATURE") {
     gs.log.push("Summon failed: card is not a creature in hand.");
@@ -916,22 +957,24 @@ if (!needsTarget) {
 // Execute the spell with the target
 const effects = cardRegistry.getEffects(source);
 console.log("Executing effects in resolution:", effects);
+// Execute each effect with appropriate target
 effects.forEach((effect, index) => {
   console.log(`Effect ${index} targetType:`, effect.targetType);
+  
   if (effect.targetType === "TARGET_PLAYER") {
     console.log("Detected TARGET_PLAYER - targeting enemy");
-    // Automatically target enemy player
     const enemyPlayerIndex = 1 - sourcePlayerIndex;
-    console.log("Enemy index:", enemyPlayerIndex);
     const enemyTarget = {
       playerIndex: enemyPlayerIndex,
       slotIndex: "PLAYER" as const
     };
-    console.log("Calling executeEffect with:", enemyTarget);
+    console.log("Calling executeEffect with enemy target:", enemyTarget);
     effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, enemyTarget);
+  } else if (effect.targetType === "SELF_PLAYER") {  // ADD THIS
+    console.log("Detected SELF_PLAYER - no target needed");
+    effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, undefined);
   } else {
     console.log("Not TARGET_PLAYER - using provided target:", target);
-    // Use the provided target for creature-targeting effects
     effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, target);
   }
 });
@@ -1003,11 +1046,14 @@ function triggerLocationEffects(
   const matchingEffects = effects.filter(e => e.timing === timing);
   
   matchingEffects.forEach(effect => {
-    // Track once-per-turn usage if needed
-    const pAny = player as any;
-    const locationKey = player.location!.name;
+    // Check if this is a once-per-turn effect
+    const isOncPerTurn = player.location!.text.toLowerCase().includes("once each turn") ||
+                         player.location!.text.toLowerCase().includes("once per turn");
     
-    if (effect.customScript?.includes("ONCE_PER_TURN")) {
+    if (isOncPerTurn) {
+      const pAny = player as any;
+      const locationKey = player.location!.name;
+      
       if (!pAny.locationUsedThisTurn) pAny.locationUsedThisTurn = new Set();
       const usageKey = `${locationKey}-${context?.slotIndex}`;
       
@@ -1661,43 +1707,66 @@ export function chooseDiscardFromHand(state: GameState, handCardId: string): Gam
 // EVOLUTIONS
 // ---------------------------------------------------------------------------
 
-export function transformEvolution(
-  state: GameState,
-  evoCardId: string,
+function canPlayEvolution(
+  gs: GameState,
+  evo: EvolutionCard,
   slotIndex: number
-): GameState {
-  const gs = cloneState(state);
+): boolean {
   const player = gs.players[gs.activePlayerIndex];
-
-  const evo = player.evolutionDeck.find(e => e.id === evoCardId);
-  if (!evo || evo.evoType !== "TRANSFORM") return gs;
-
   const bc = player.board[slotIndex];
-  if (!bc || bc.card.kind !== "CREATURE") {
-    gs.log.push(`No base creature to transform in slot ${slotIndex + 1}.`);
-    return gs;
+  
+  // If slot is empty, any evolution can be played there
+  if (!bc) return true;
+  
+  const text = evo.text.toLowerCase();
+  
+  // Check "evolve from X" requirement
+  if (text.includes("evolve from")) {
+    const creatureName = bc.card.name;
+    if (!text.includes(creatureName.toLowerCase())) {
+      return false;
+    }
   }
-
-  const baseCard = bc.card as CreatureCard;
-
-  if (baseCard.name !== evo.baseName || baseCard.rank !== evo.requiredRank) {
-    gs.log.push(`Cannot evolve: ${evo.name} does not match ${baseCard.name}.`);
-    return gs;
+  
+  // Check "has taken damage" requirement
+  if (text.includes("has taken damage") || text.includes("taken damage but survived")) {
+    const maxHp = (bc.card as any).hp || 0;
+    const damageTaken = maxHp - bc.currentHp;
+    if (damageTaken <= 0) return false;
   }
-
-  const oldHp = bc.currentHp;
-  const newMaxHp = evo.hp + relicHpBonus(player, slotIndex);
-  bc.card = evo;
-  bc.currentHp = Math.min(oldHp, newMaxHp);
-  bc.hasSummoningSickness = false;
-
-  ensureRuntimeFields(bc);
-
-  player.evolutionDeck = player.evolutionDeck.filter(e => e.id !== evo.id);
-
-  gs.log.push(`${baseCard.name} evolves into ${evo.name}.`);
-
-  return gs;
+  
+  // Check "has full HP" or "full HP" requirement
+  if (text.includes("full hp") || text.includes("has full hp")) {
+    const maxHp = (bc.card as any).hp || 0;
+    if (bc.currentHp !== maxHp) return false;
+  }
+  
+  // Check "cast X or more spells this turn"
+  const spellsMatch = text.match(/cast[ed]?\s+(\d+)\s+or more spells/);
+  if (spellsMatch) {
+    const required = parseInt(spellsMatch[1]);
+    const pAny = player as any;
+    const spellsCast = pAny.spellsCastThisTurn || 0;
+    if (spellsCast < required) return false;
+  }
+  
+  // Check "dealt damage this turn"
+  if (text.includes("dealt damage this turn")) {
+    const bcAny = bc as any;
+    if (!bcAny.dealtDamageThisTurn) return false;
+  }
+  
+  // Check "X or more creatures in your graveyard"
+  const graveyardMatch = text.match(/(\d+)\s+or more creatures in (?:your )?graveyard/);
+  if (graveyardMatch) {
+    const required = parseInt(graveyardMatch[1]);
+    const creaturesInGraveyard = player.graveyard.filter(
+      c => c.kind === "CREATURE" || c.kind === "EVOLUTION"
+    ).length;
+    if (creaturesInGraveyard < required) return false;
+  }
+  
+  return true;
 }
 
 export function playDropInEvolution(
@@ -1710,25 +1779,41 @@ export function playDropInEvolution(
   const player = gs.players[gs.activePlayerIndex];
 
   const evo = player.evolutionDeck.find(e => e.id === evoCardId);
-  if (!evo || evo.evoType !== "DROP_IN") return gs;
+  if (!evo) return gs;
+
+  // Check if evolution conditions are met
+  if (!canPlayEvolution(gs, evo, slotIndex)) {
+    gs.log.push(`Cannot play ${evo.name}: evolution conditions not met.`);
+    return gs;
+  }
 
   if (!overwriteExisting && player.board[slotIndex]) {
     gs.log.push(`Slot ${slotIndex + 1} is occupied; use overwriteExisting=true to overwrite.`);
     return gs;
   }
 
-const existing = player.board[slotIndex];
-if (existing) {
-  // Send relics to graveyard
-  const relicsToMove = player.relics.filter(r => r.slotIndex === slotIndex);
-  relicsToMove.forEach(r => {
-    player.graveyard.push(r.relic);
-    gs.log.push(`${r.relic.name} goes to the graveyard.`);
-  });
-  player.relics = player.relics.filter(r => r.slotIndex !== slotIndex);
+  const existing = player.board[slotIndex];
   
-  player.graveyard.push(existing.card);
-}
+  // Check if existing creature is frozen
+  if (existing && overwriteExisting && (existing as any).frozenForTurns > 0) {
+    gs.log.push(`${existing.card.name} is Frozen and cannot be replaced.`);
+    return gs;
+  }
+  
+  if (existing) {
+    // Remove relic bonuses before removing creature
+    removeAllRelicsFromCreature(existing);
+    
+    // Send relics to graveyard
+    const relicsToMove = player.relics.filter(r => r.slotIndex === slotIndex);
+    relicsToMove.forEach(r => {
+      player.graveyard.push(r.relic);
+      gs.log.push(`${r.relic.name} goes to the graveyard.`);
+    });
+    player.relics = player.relics.filter(r => r.slotIndex !== slotIndex);
+    
+    player.graveyard.push(existing.card);
+  }
 
   const bc: BoardCreature = {
     card: evo,
@@ -1740,7 +1825,7 @@ if (existing) {
   player.board[slotIndex] = bc;
   player.evolutionDeck = player.evolutionDeck.filter(e => e.id !== evo.id);
 
-  gs.log.push(`${player.name} summons drop-in evolution ${evo.name}.`);
+  gs.log.push(`${player.name} summons evolution ${evo.name}.`);
 
   return gs;
 }

@@ -216,21 +216,21 @@ export const waterCardDefinitions: CardDefinition[] = [
     ],
   },
   
-  {
-    id: "W-S-003",
-    name: "Frostbeam Impact",
-    kind: "FAST_SPELL",
-    text: "Deal 2 damage to a creature and Freeze it for its controller's next turn.",
-    imagePath: "/cards/water/Frostbeam Impact.png",
-    effects: [
-      {
-        timing: "IMMEDIATE",
-        targetType: "TARGET_CREATURE",
-        damage: 2,
-        freeze: 1,
-      },
-    ],
-  },
+{
+  id: "W-S-003",
+  name: "Frostbeam Impact",
+  kind: "FAST_SPELL",
+  text: "Deal 2 damage to a creature and Freeze it for its controller's next turn.",
+  imagePath: "/cards/water/Frostbeam Impact.png",
+  effects: [
+    {
+      timing: "IMMEDIATE",
+      targetType: "TARGET_CREATURE",
+      damage: 2,
+      freeze: 2,  // Change from 1 to 2
+    },
+  ],
+},
   
   {
     id: "W-S-004",
@@ -248,25 +248,25 @@ export const waterCardDefinitions: CardDefinition[] = [
     ],
   },
   
-  {
-    id: "W-S-005",
-    name: "Bubble Scripture",
-    kind: "SLOW_SPELL",
-    text: "Heal 3, then draw 1.",
-    imagePath: "/cards/water/Bubble Scripture.png",
-    effects: [
-      {
-        timing: "IMMEDIATE",
-        targetType: "TARGET_PLAYER",
-        heal: 3,
-      },
-      {
-        timing: "IMMEDIATE",
-        targetType: "NONE",
-        draw: 1,
-      },
-    ],
-  },
+{
+  id: "W-S-005",
+  name: "Bubble Scripture",
+  kind: "SLOW_SPELL",
+  text: "Heal 3, then draw 1.",
+  imagePath: "/cards/water/Bubble Scripture.png",
+  effects: [
+    {
+      timing: "IMMEDIATE",
+      targetType: "SELF_PLAYER",  // Change from TARGET_PLAYER
+      heal: 3,
+    },
+    {
+      timing: "IMMEDIATE",
+      targetType: "NONE",
+      draw: 1,
+    },
+  ],
+},
   
   {
     id: "W-S-006",
@@ -354,7 +354,6 @@ export const waterCardDefinitions: CardDefinition[] = [
   id: "W-E-001",
   name: "Tide Guardian",
   kind: "EVOLUTION",
-  evoType: "TRANSFORM",
   baseName: "Tide Whelpling",
   requiredRank: 1,
   atk: 4,
@@ -378,7 +377,6 @@ export const waterCardDefinitions: CardDefinition[] = [
   id: "W-E-002",
   name: "Glowfin Glider",
   kind: "EVOLUTION",
-  evoType: "TRANSFORM",
   baseName: "Glowfin Nibbler",
   requiredRank: 1,
   atk: 4,
@@ -403,11 +401,10 @@ export const waterCardDefinitions: CardDefinition[] = [
   id: "W-E-003",
   name: "Coral General",
   kind: "EVOLUTION",
-  evoType: "TRANSFORM",
   baseName: "Coral Soldier",
   requiredRank: 2,
   atk: 5,
-  hp: 7,
+  hp: 9,
   text: "Evolve from Coral Soldier when it has full HP. Guard. Armor 2. When this takes damage from an attack, deal 1 damage to the attacker.",
   imagePath: "/cards/water/Coral General.png",
   keywords: [
@@ -428,7 +425,6 @@ export const waterCardDefinitions: CardDefinition[] = [
   id: "W-E-004",
   name: "Crankstar",
   kind: "EVOLUTION",
-  evoType: "TRANSFORM",
   baseName: "Grumpstar",
   requiredRank: 1,
   atk: 6,
@@ -452,7 +448,6 @@ export const waterCardDefinitions: CardDefinition[] = [
   id: "W-E-005",
   name: "Coralex",
   kind: "EVOLUTION",
-  evoType: "DROP_IN",
   baseName: "Coralyte",
   requiredRank: 3,
   atk: 11,
@@ -725,26 +720,26 @@ export const fireCardDefinitions: CardDefinition[] = [
     ],
   },
   
-  {
-    id: "F-S-006",
-    name: "Overheat",
-    kind: "SLOW_SPELL",
-    text: "Deal 5 damage to a creature. You lose 2 life.",
-    imagePath: "/cards/fire/Overheat.png",
-    effects: [
-      {
-        timing: "IMMEDIATE",
-        targetType: "TARGET_CREATURE",
-        damage: 5,
-      },
-      {
-        timing: "IMMEDIATE",
-        targetType: "TARGET_PLAYER",
-        damage: 2,
-        customScript: "SELF_DAMAGE",
-      },
-    ],
-  },
+{
+  id: "F-S-006",
+  name: "Overheat",
+  kind: "SLOW_SPELL",
+  text: "Deal 5 damage to a creature. You lose 2 life.",
+  imagePath: "/cards/fire/Overheat.png",
+  effects: [
+    {
+      timing: "IMMEDIATE",
+      targetType: "TARGET_CREATURE",
+      damage: 5,
+    },
+    {
+      timing: "IMMEDIATE",
+      targetType: "SELF_PLAYER",  // Change from TARGET_PLAYER
+      damage: 2,
+      // Remove customScript: "SELF_DAMAGE"
+    },
+  ],
+},
   
 {
   id: "F-S-007",
@@ -806,14 +801,13 @@ export const fireCardDefinitions: CardDefinition[] = [
   id: "F-L-001",
   name: "Molten Trail",
   kind: "LOCATION",
-  text: "Once each turn, when one of your creatures hits the enemy, deal 1 extra damage. Lasts 2 of your turns.",
+  text: "When one of your creatures hits the enemy, deal 1 extra damage. Lasts 2 of your turns.",
   imagePath: "/cards/fire/Molten Trail.png",
   effects: [
     {
       timing: "ON_DAMAGE",
       targetType: "TARGET_PLAYER",
       damage: 1,
-      customScript: "ONCE_PER_TURN_PER_CREATURE",
     },
   ],
 },
@@ -823,7 +817,6 @@ export const fireCardDefinitions: CardDefinition[] = [
   id: "F-E-001",
   name: "Moltusk",
   kind: "EVOLUTION",
-  evoType: "TRANSFORM",
   baseName: "Scorchog",
   requiredRank: 2,
   atk: 6,
@@ -847,7 +840,6 @@ export const fireCardDefinitions: CardDefinition[] = [
   id: "F-E-002",
   name: "Coalfiend Trickster",
   kind: "EVOLUTION",
-  evoType: "TRANSFORM",
   baseName: "Coalimp",
   requiredRank: 1,
   atk: 7,
@@ -866,7 +858,6 @@ export const fireCardDefinitions: CardDefinition[] = [
   id: "F-E-003",
   name: "Embercrack Bladelord",
   kind: "EVOLUTION",
-  evoType: "TRANSFORM",
   baseName: "Embercrack Duelist",
   requiredRank: 1,
   atk: 7,
@@ -890,7 +881,6 @@ export const fireCardDefinitions: CardDefinition[] = [
   id: "F-E-004",
   name: "Prismflare Colossus",
   kind: "EVOLUTION",
-  evoType: "TRANSFORM",
   baseName: "Prismflare Beetle",
   requiredRank: 1,
   atk: 5,
@@ -915,7 +905,6 @@ export const fireCardDefinitions: CardDefinition[] = [
   id: "F-E-005",
   name: "Scorvane - The Ash King",
   kind: "EVOLUTION",
-  evoType: "DROP_IN",
   baseName: "Scorvane",
   requiredRank: 3,
   atk: 9,

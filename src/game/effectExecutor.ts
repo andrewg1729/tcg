@@ -5,38 +5,40 @@ import { CardEffect, TargetType } from "./cardEffects";
 import { SpellTarget } from "./engine";
 
 export class EffectExecutor {
-executeEffect(
-  gs: GameState,
-  effect: CardEffect,
-  sourcePlayerIndex: number,
-  target?: SpellTarget
-): void {
+  executeEffect(
+    gs: GameState,
+    effect: CardEffect,
+    sourcePlayerIndex: number,
+    target?: SpellTarget
+  ): void {
     console.log("effectExecutor.executeEffect called with:", {
-    effect,
-    sourcePlayerIndex,
-    target,
-    timing: effect.timing
-  });
-  
-  switch (effect.timing) {
-    case "IMMEDIATE":
-      this.executeImmediateEffect(gs, effect, sourcePlayerIndex, target);
-      break;
-    case "ON_PLAY":
-      this.executeOnPlayEffect(gs, effect, sourcePlayerIndex, target); // Pass target here!
-      break;
-          case "ON_ATTACK":  // Add this case
-      this.executeOnAttackEffect(gs, effect, sourcePlayerIndex);
-      break;
-    case "DEATH":
-      this.executeDeathEffect(gs, effect, sourcePlayerIndex);
-      break;
-    case "CATALYST":
-      this.executeCatalystEffect(gs, effect, sourcePlayerIndex);
-      break;
-    // Add other timings as needed
+      effect,
+      sourcePlayerIndex,
+      target,
+      timing: effect.timing
+    });
+    
+    switch (effect.timing) {
+      case "IMMEDIATE":
+        this.executeImmediateEffect(gs, effect, sourcePlayerIndex, target);
+        break;
+      case "ON_PLAY":
+        this.executeOnPlayEffect(gs, effect, sourcePlayerIndex, target);
+        break;
+      case "ON_ATTACK":
+        this.executeOnAttackEffect(gs, effect, sourcePlayerIndex);
+        break;
+      case "ON_DAMAGE":
+        this.executeImmediateEffect(gs, effect, sourcePlayerIndex, target);
+        break;
+      case "DEATH":
+        this.executeDeathEffect(gs, effect, sourcePlayerIndex);
+        break;
+      case "CATALYST":
+        this.executeCatalystEffect(gs, effect, sourcePlayerIndex);
+        break;
+    }
   }
-}
   
 private executeImmediateEffect(
   gs: GameState,
@@ -50,36 +52,57 @@ private executeImmediateEffect(
   console.log("executeImmediateEffect - target:", target);
   console.log("target.slotIndex:", target?.slotIndex);
   console.log("target.type:", target?.type);
+  console.log("effect.damage:", effect.damage);
   
-  // Handle custom scripts first
-  if (effect.customScript) {
+  // Handle HEAL_IF_KILL specially - check before and after damage
+  let creatureWasAlive = false;
+  if (effect.customScript === "HEAL_IF_KILL" && target?.type === "CREATURE" && effect.damage) {
+    const targetPlayer = gs.players[target.playerIndex];
+    creatureWasAlive = targetPlayer.board[target.slotIndex] !== null;
+  }
+  
+  // Handle custom scripts first (but don't return - continue processing)
+  if (effect.customScript && effect.customScript !== "HEAL_IF_KILL") {
     this.handleCustomScript(gs, effect.customScript, playerIndex, target);
-    return;
   }
   
   // Handle damage
-// Handle damage
-if (effect.damage !== undefined) {
-  if (target?.type === "CREATURE") {
-    this.applyDamageToCreature(
-      gs,
-      target.playerIndex,
-      target.slotIndex,
-      effect.damage,
-      true
-    );
-  } else if (target?.type === "PLAYER") {
-    const targetPlayer = gs.players[target.playerIndex];
-    targetPlayer.life -= effect.damage;
-    gs.log.push(`${targetPlayer.name} takes ${effect.damage} damage.`);
-  } else if (target?.slotIndex === "PLAYER") {
-    const targetPlayer = gs.players[target.playerIndex];
-    targetPlayer.life -= effect.damage;
-    gs.log.push(`${targetPlayer.name} takes ${effect.damage} damage.`);
-  } else if (effect.targetType === "SELF_PLAYER") {  // ADD THIS CASE
-    player.life -= effect.damage;
-    gs.log.push(`${player.name} loses ${effect.damage} life.`);
-  } else if (effect.targetType === "ALL_ENEMY") {
+  if (effect.damage !== undefined) {
+    console.log("Processing damage effect");
+    console.log("target?.type === 'CREATURE':", target?.type === "CREATURE");
+    console.log("target?.type === 'PLAYER':", target?.type === "PLAYER");
+    console.log("target?.slotIndex === 'PLAYER':", target?.slotIndex === "PLAYER");
+    
+    if (target?.type === "CREATURE") {
+      this.applyDamageToCreature(
+        gs,
+        target.playerIndex,
+        target.slotIndex,
+        effect.damage,
+        true
+      );
+      
+      // Check if HEAL_IF_KILL condition is met (creature died)
+      if (effect.customScript === "HEAL_IF_KILL" && creatureWasAlive) {
+        const targetPlayer = gs.players[target.playerIndex];
+        const creatureIsDead = targetPlayer.board[target.slotIndex] === null;
+        
+        if (creatureIsDead) {
+          this.healPlayer(gs, playerIndex, 1, true);
+        }
+      }
+    } else if (target?.type === "PLAYER") {
+        const targetPlayer = gs.players[target.playerIndex];
+        targetPlayer.life -= effect.damage;
+        gs.log.push(`${targetPlayer.name} takes ${effect.damage} damage.`);
+      } else if (target?.slotIndex === "PLAYER") {
+        const targetPlayer = gs.players[target.playerIndex];
+        targetPlayer.life -= effect.damage;
+        gs.log.push(`${targetPlayer.name} takes ${effect.damage} damage.`);
+      } else if (effect.targetType === "SELF_PLAYER") {
+        player.life -= effect.damage;
+        gs.log.push(`${player.name} loses ${effect.damage} life.`);
+      } else if (effect.targetType === "ALL_ENEMY") {
         enemy.board.forEach((bc, idx) => {
           if (bc) {
             this.applyDamageToCreature(gs, 1 - playerIndex, idx, effect.damage!, true);
@@ -102,17 +125,21 @@ if (effect.damage !== undefined) {
       }
     }
     
-    // Handle healing
-    if (effect.heal !== undefined) {
-      if (target?.type === "CREATURE") {
-        this.healCreature(gs, target.playerIndex, target.slotIndex, effect.heal, true);
-      } else if (target?.type === "PLAYER") {
-        this.healPlayer(gs, target.playerIndex, effect.heal, true);
-      } else if (effect.targetType === "TARGET_PLAYER") {
-        // Default to healing self
-        this.healPlayer(gs, playerIndex, effect.heal, true);
-      }
-    }
+// Handle healing
+if (effect.heal !== undefined) {
+  if (target?.type === "CREATURE") {
+    this.healCreature(gs, target.playerIndex, target.slotIndex, effect.heal, true);
+  } else if (target?.type === "PLAYER") {
+    this.healPlayer(gs, target.playerIndex, effect.heal, true);
+  } else if (target?.slotIndex === "PLAYER") {
+    this.healPlayer(gs, target.playerIndex, effect.heal, true);
+  } else if (effect.targetType === "SELF_PLAYER") {  // ADD THIS
+    this.healPlayer(gs, playerIndex, effect.heal, true);
+  } else if (effect.targetType === "TARGET_PLAYER") {
+    // Default to healing self
+    this.healPlayer(gs, playerIndex, effect.heal, true);
+  }
+}
     
     // Handle draw
     if (effect.draw !== undefined && effect.draw > 0) {
@@ -203,16 +230,27 @@ private executeOnPlayEffect(
   target?: SpellTarget
 ): void {
   const player = gs.players[playerIndex];
+  const enemy = gs.players[1 - playerIndex];
   
-  // Handle damage for ON_PLAY effects
-  if (effect.damage !== undefined && target?.type === "CREATURE") {
-    this.applyDamageToCreature(
-      gs,
-      target.playerIndex,
-      target.slotIndex,
-      effect.damage,
-      false // Not from a spell
-    );
+  // Handle damage
+  if (effect.damage !== undefined) {
+    if (effect.targetType === "ALL_ENEMY") {
+      // Damage all enemy creatures
+      enemy.board.forEach((bc, idx) => {
+        if (bc) {
+          this.applyDamageToCreature(gs, 1 - playerIndex, idx, effect.damage!, false);
+        }
+      });
+    } else if (target?.type === "CREATURE") {
+      // Damage targeted creature
+      this.applyDamageToCreature(
+        gs,
+        target.playerIndex,
+        target.slotIndex,
+        effect.damage,
+        false
+      );
+    }
   }
   
   // Handle healing for ON_PLAY effects
@@ -235,22 +273,22 @@ private executeOnPlayEffect(
   }
 }
 
-private executeOnAttackEffect(
-  gs: GameState,
-  effect: CardEffect,
-  playerIndex: number
-): void {
-  const enemy = gs.players[1 - playerIndex];
-  
-  // Handle damage to all enemy creatures
-  if (effect.damage !== undefined && effect.targetType === "ALL_ENEMY") {
-    enemy.board.forEach((bc, idx) => {
-      if (bc) {
-        this.applyDamageToCreature(gs, 1 - playerIndex, idx, effect.damage!, false);
-      }
-    });
+  private executeOnAttackEffect(
+    gs: GameState,
+    effect: CardEffect,
+    playerIndex: number
+  ): void {
+    const enemy = gs.players[1 - playerIndex];
+    
+    // Handle damage to all enemy creatures
+    if (effect.damage !== undefined && effect.targetType === "ALL_ENEMY") {
+      enemy.board.forEach((bc, idx) => {
+        if (bc) {
+          this.applyDamageToCreature(gs, 1 - playerIndex, idx, effect.damage!, false);
+        }
+      });
+    }
   }
-}
   
   private executeDeathEffect(
     gs: GameState,
@@ -314,6 +352,8 @@ private executeOnAttackEffect(
     const player = gs.players[playerIndex];
     const enemy = gs.players[1 - playerIndex];
     
+    // Custom scripts that need special handling
+    // Most custom scripts are just for tracking/filtering, not execution
     switch (script) {
       case "RESURRECT_TO_FIELD":
         this.resurrectToField(gs, playerIndex);
@@ -337,13 +377,17 @@ private executeOnAttackEffect(
         }
         break;
         
-      case "SELF_DAMAGE":
-        player.life -= 2;
-        gs.log.push(`${player.name} loses 2 life.`);
+      case "ONCE_PER_TURN_PER_CREATURE":
+        // This is handled in triggerLocationEffects, not here
+        // Just ignore it
         break;
         
       default:
-        gs.log.push(`Unknown custom script: ${script}`);
+        // Unknown custom script - just log it
+        // Don't log for common filter scripts
+        if (!["EXCLUDE_SELF", "ENEMY_ONLY", "FRIENDLY_ONLY"].includes(script)) {
+          console.log(`Custom script (may be handled elsewhere): ${script}`);
+        }
     }
   }
   

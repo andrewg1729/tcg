@@ -7,13 +7,13 @@ import {
   endPhase,
   playRelic,
   playLocation,
-  transformEvolution,
   playDropInEvolution,
   getSummonHpCostForCard,
   chooseDiscardFromHand,
   summonWithChosenSacrifices,
   resolveOnPlayTargeting,
   getValidTargets,
+  cancelPendingTarget,
   resolveSpellTargeting,
   resolveRelicTargeting,
   cloneState,
@@ -165,6 +165,10 @@ function handleAttachRelic(slotIndex: number) {
     setState((prev) => playLocation(prev, card.id));
   }
 
+  function handleCancelTarget() {
+  setState((prev) => cancelPendingTarget(prev));
+}
+
   // Sacrifice selection
   function handleToggleSacrificeSlot(slotIndex: number) {
     if (!pendingSacSummon) return;
@@ -199,11 +203,6 @@ function handleAttachRelic(slotIndex: number) {
         setSelectedSacSlots([]);
       }
     }
-  }
-
-  // Evolutions
-  function handleTransformEvo(evo: EvolutionCard, slotIndex: number) {
-    setState((prev) => transformEvolution(prev, evo.id, slotIndex));
   }
 
   function handleDropInEvo(
@@ -358,7 +357,6 @@ const handleCreatureClick = (playerIndex: number, slotIndex: number) => {
           <EvolutionSection
             evolutions={active.evolutionDeck}
             player={active}
-            onTransform={handleTransformEvo}
             onDropIn={handleDropInEvo}
             onMouseEnter={handleCardHover}
           />
@@ -367,6 +365,7 @@ const handleCreatureClick = (playerIndex: number, slotIndex: number) => {
             phase={state.phase}
             log={state.log}
             onEndPhase={handleEndPhase}
+              onCancelTarget={state.pendingTarget ? handleCancelTarget : undefined}
           />
         </div>
       </div>

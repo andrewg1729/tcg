@@ -57,11 +57,8 @@ export interface LocationCard extends BaseCard {
 
 // --- Evolutions ---
 
-export type EvolutionType = "TRANSFORM" | "DROP_IN";
-
 export interface EvolutionCard extends BaseCard {
   kind: "EVOLUTION";
-  evoType: EvolutionType;
   baseName: string;     // name of the base creature this can evolve from
   requiredRank: Rank;   // rank of the base creature
   atk: number;
