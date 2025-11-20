@@ -33,6 +33,7 @@ const KEYWORD_TOOLTIPS: Record<string, string> = {
   VIGILANT: "This creature can attack twice per turn.",
   SWIFT: "Does not have summoning sickness (can attack immediately).",
   DEATH: "Triggers an effect when this creature dies.",
+    THORNS: "When this creature takes damage from an attack, deal X damage back to the attacker.",
 };
 
 export const CardPreview: React.FC<CardPreviewProps> = ({ 

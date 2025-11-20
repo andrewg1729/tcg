@@ -65,6 +65,8 @@ function getKeywordValue(card: any, keyword: string): number {
       return kw?.regen || 0;
     case "SURGE":
       return kw?.surge || 0;
+    case "THORNS":  // ADD THIS
+      return kw?.thorns || 0;
     default:
       return 0;
   }
@@ -440,25 +442,27 @@ function startTurn(gs: GameState): void {
   drawCard(current);
   gs.log.push(`Turn ${gs.turnNumber}: ${current.name} draws a card.`);
 
-  // Reset summoning sickness, attacks, apply Regen and Surge, decrement freeze and locations
+  // Reset summoning sickness, attacks, apply Regen and Surge, decrement freeze
   current.board.forEach((bc, idx) => {
     if (!bc) return;
     ensureRuntimeFields(bc);
     bc.hasSummoningSickness = false;
-    (bc as any).attacksThisTurn = 0;
+  (bc as any).dealtDamageThisTurn = false;
+  (bc as any).killedCreatureThisTurn = false; // Add this
+  (bc as any).attacksThisTurn = 0;
 
-const regen = getRegen(gs, gs.activePlayerIndex, idx);
+    const regen = getRegen(gs, gs.activePlayerIndex, idx);
 
-if (regen > 0) {
-bc.currentHp = Math.min(
-  bc.currentHp + regen,
-  (bc.card as any).hp
-);
-  gs.log.push(`${bc.card.name} regenerates ${regen} HP.`);
-}
+    if (regen > 0) {
+      bc.currentHp = Math.min(
+        bc.currentHp + regen,
+        (bc.card as any).hp
+      );
+      gs.log.push(`${bc.card.name} regenerates ${regen} HP.`);
+    }
 
     // Surge - apply temporary ATK buff
-    const surgeValue = getKeywordValue(bc.card.name, "SURGE");
+    const surgeValue = getKeywordValue(bc.card, "SURGE");
     if (surgeValue > 0) {
       (bc as any).tempAtkBuff = ((bc as any).tempAtkBuff || 0) + surgeValue;
       gs.log.push(`${bc.card.name} gains Surge +${surgeValue} ATK this turn.`);
@@ -470,8 +474,18 @@ bc.currentHp = Math.min(
     }
   });
 
-  // Decrement location durations
+  (current as any).healedThisTurn = false;
+
+  // Reset location usage tracking for once-per-turn effects
   const currAny = current as any;
+  if (currAny.locationUsedThisTurn) {
+    currAny.locationUsedThisTurn.clear();
+  }
+
+  // Trigger start of turn effects
+  triggerStartOfTurnEffects(gs, gs.activePlayerIndex);
+
+  // Decrement location durations
   if (currAny.locationTurnsRemaining != null) {
     currAny.locationTurnsRemaining -= 1;
     if (currAny.locationTurnsRemaining <= 0) {
@@ -482,13 +496,6 @@ bc.currentHp = Math.min(
       current.location = null;
       currAny.locationTurnsRemaining = null;
     }
-  }
-
-  // Reset Molten Trail per-creature usage
-  if (!currAny.moltenTrailUsed) {
-    currAny.moltenTrailUsed = [false, false, false];
-  } else {
-    currAny.moltenTrailUsed = [false, false, false];
   }
 }
 
@@ -503,31 +510,24 @@ export function endPhase(state: GameState): GameState {
   } else if (p === "ATTACK") {
     gs.phase = "END";
   } else if (p === "END") {
-  const current = gs.players[gs.activePlayerIndex];
-  
-  // Clear all temporary "until end of turn" buffs
-  current.board.forEach((bc) => {
-    if (!bc) return;
-    ensureRuntimeFields(bc);
+    const current = gs.players[gs.activePlayerIndex];
     
-    // Reset all temporary ATK buffs (from spells, surge, etc.)
-    (bc as any).tempAtkBuff = 0;
+    triggerEndOfTurnEffects(gs, gs.activePlayerIndex);
     
-    // Clear any other temporary buffs here as needed
-    // preventedDamage stays (it's consumed, not time-based)
-    // frozenForTurns decrements at start of turn, not end
-  });
+    current.board.forEach((bc) => {
+      if (!bc) return;
+      ensureRuntimeFields(bc);
+      
+      (bc as any).tempAtkBuff = 0;
+    });
 
-  // Turn passes to other player
-  gs.turnNumber += 1;
-  gs.activePlayerIndex = gs.activePlayerIndex === 0 ? 1 : 0;
+    gs.turnNumber += 1;
+    gs.activePlayerIndex = gs.activePlayerIndex === 0 ? 1 : 0;
 
-  // Start of turn: draw + upkeep (this will re-apply Surge for the new turn)
-  startTurn(gs);
+    startTurn(gs);
 
-  // Immediately move to MAIN
-  gs.phase = "MAIN";
-}
+    gs.phase = "MAIN";
+  }
 
   return gs;
 }
@@ -1122,6 +1122,21 @@ function triggerOnPlayEffects(gs: GameState, playerIndex: number, slotIndex: num
   }
 }
 
+function triggerEndOfTurnEffects(gs: GameState, playerIndex: number) {
+  const player = gs.players[playerIndex];
+  
+  player.board.forEach((bc) => {
+    if (!bc) return;
+    
+    const effects = cardRegistry.getEffects(bc.card.name);
+    const endEffects = effects.filter(e => e.timing === "END_OF_TURN");
+    
+    endEffects.forEach(effect => {
+      effectExecutor.executeEffect(gs, effect, playerIndex, undefined);
+    });
+  });
+}
+
 export function resolveOnPlayTargeting(
   state: GameState,
   targetPlayerIndex: number,
@@ -1185,6 +1200,39 @@ function triggerOnAttackEffects(gs: GameState, playerIndex: number, slotIndex: n
   });
 }
 
+function triggerStartOfTurnEffects(gs: GameState, playerIndex: number) {
+  const player = gs.players[playerIndex];
+  
+  player.board.forEach((bc, slotIndex) => {
+    if (!bc) return;
+    
+    const effects = cardRegistry.getEffects(bc.card.name);
+    const startEffects = effects.filter(e => e.timing === "START_OF_TURN");
+    
+    startEffects.forEach(effect => {
+      // For random friendly targeting
+      if (effect.customScript === "RANDOM_FRIENDLY" && effect.heal) {
+        const friendlyCreatures = player.board
+          .map((creature, idx) => ({ creature, idx }))
+          .filter(c => c.creature !== null);
+        
+        if (friendlyCreatures.length > 0) {
+          const randomIndex = Math.floor(Math.random() * friendlyCreatures.length);
+          const target = friendlyCreatures[randomIndex];
+          
+          effectExecutor.executeEffect(gs, effect, playerIndex, {
+            type: "CREATURE",
+            playerIndex: playerIndex,
+            slotIndex: target.idx
+          });
+        }
+      } else {
+        effectExecutor.executeEffect(gs, effect, playerIndex, undefined);
+      }
+    });
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Damage & Healing helpers
 // ---------------------------------------------------------------------------
@@ -1225,66 +1273,53 @@ function applyCreatureDamage(
   bc.currentHp -= dmg;
   gs.log.push(`${bc.card.name} takes ${dmg} damage.`);
 
-  if (bc.currentHp <= 0) {
-    // Trigger death effects
-    triggerDeathEffects(gs, targetPlayerIndex, slotIndex);
-    
-    // Send relics to graveyard
-    const attachedRelics = player.relics.filter(r => r.slotIndex === slotIndex);
-    attachedRelics.forEach(relicData => {
-      player.graveyard.push(relicData.relic);
-      gs.log.push(`${relicData.relic.name} goes to the graveyard.`);
+if (bc.currentHp <= 0) {
+  // Trigger death effects
+  triggerDeathEffects(gs, targetPlayerIndex, slotIndex);
+  
+  // Track which creature killed it (if from combat)
+  if (!isSpellDamage) {
+    // Mark all creatures that dealt damage this turn as having killed
+    const attackingPlayer = gs.players[gs.activePlayerIndex];
+    attackingPlayer.board.forEach(atkCreature => {
+      if (atkCreature && (atkCreature as any).dealtDamageThisTurn) {
+        (atkCreature as any).killedCreatureThisTurn = true;
+      }
     });
-    
-    // Remove relics from player's relic list
-    player.relics = player.relics.filter(r => r.slotIndex !== slotIndex);
-    
-    // Send creature to graveyard
-    player.graveyard.push(bc.card);
-    player.board[slotIndex] = null;
-    gs.log.push(`${bc.card.name} dies.`);
   }
+  
+  // Remove relics and their bonuses
+  const attachedRelics = player.relics.filter(r => r.slotIndex === slotIndex);
+  attachedRelics.forEach(relicData => {
+    player.graveyard.push(relicData.relic);
+    gs.log.push(`${relicData.relic.name} goes to the graveyard.`);
+  });
+  player.relics = player.relics.filter(r => r.slotIndex !== slotIndex);
+  
+  // Send creature to graveyard
+  player.graveyard.push(bc.card);
+  player.board[slotIndex] = null;
+  gs.log.push(`${bc.card.name} dies.`);
+}
 }
 
-function healCreature(
-  gs: GameState,
-  targetPlayerIndex: number,
-  slotIndex: number,
-  amount: number,
-  fromSpell: boolean
-) {
-  const player = gs.players[targetPlayerIndex];
-  const bc = player.board[slotIndex];
-  if (!bc) return;
-  ensureRuntimeFields(bc);
-
-  let heal = amount;
-
-  // Tideswell Basin: healing spells heal +1
-  const loc = player.location;
-  if (fromSpell && loc && loc.name === WATER_LOCATION) {
-    heal += 1;
-  }
-
-  const maxHp = (bc.card as any).hp + relicHpBonus(player, slotIndex);
-  const old = bc.currentHp;
-  bc.currentHp = Math.min(bc.currentHp + heal, maxHp);
-  gs.log.push(`${bc.card.name} heals ${bc.currentHp - old} HP.`);
-}
-
-function healPlayer(gs: GameState, playerIndex: number, amount: number, fromSpell: boolean) {
+function healPlayer(gs: GameState, playerIndex: number, amount: number, fromSpell: boolean): void {
   const player = gs.players[playerIndex];
   let heal = amount;
-
-  // Tideswell Basin
-  const loc = player.location;
-  if (fromSpell && loc && loc.name === WATER_LOCATION) {
+  
+  // Tideswell Basin bonus (if you still have this location)
+  if (fromSpell && player.location?.name === "Tideswell Basin") {
     heal += 1;
   }
-
+  
   const old = player.life;
   player.life = Math.min(20, player.life + heal);
-  gs.log.push(`${player.name} heals ${player.life - old} HP.`);
+  const actualHeal = player.life - old;
+  
+  if (actualHeal > 0) {
+    (player as any).healedThisTurn = true;
+    gs.log.push(`${player.name} heals ${actualHeal} HP.`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1349,93 +1384,135 @@ export function attack(
 
   const attackerAtk = getEffectiveAtk(gs, atkPlayerIndex, attackerSlotIndex);
 
-if (target.slotIndex === "PLAYER") {
-  defenderPlayer.life -= attackerAtk;
-  gs.log.push(`${attacker.card.name} deals ${attackerAtk} damage to ${defenderPlayer.name}.`);
+  if (target.slotIndex === "PLAYER") {
+    defenderPlayer.life -= attackerAtk;
+    gs.log.push(`${attacker.card.name} deals ${attackerAtk} damage to ${defenderPlayer.name}.`);
 
-  // Trigger location effects on damage to player
-  if (attackerPlayer.location) {
-    triggerLocationEffects(gs, atkPlayerIndex, "ON_DAMAGE", { 
-      damageDealt: attackerAtk,
-      source: attacker,
-      slotIndex: attackerSlotIndex 
-    });
-  }
+    // Mark that this creature dealt damage this turn
+    if (attackerAtk > 0) {
+      (attacker as any).dealtDamageThisTurn = true;
+    }
 
-  // Lifetap
-  if (hasLifetap(attacker.card.name)) {
-    healPlayer(gs, atkPlayerIndex, 1, false);
+    // Trigger location effects on damage to player
+    if (attackerPlayer.location) {
+      triggerLocationEffects(gs, atkPlayerIndex, "ON_DAMAGE", { 
+        damageDealt: attackerAtk,
+        source: attacker,
+        slotIndex: attackerSlotIndex 
+      });
+    }
+
+    // Lifetap
+    if (hasLifetap(attacker.card.name)) {
+      healPlayer(gs, atkPlayerIndex, 1, false);
+    }
+    
+    bcAny.attacksThisTurn += 1;
+    return gs;
   }
-  
-  bcAny.attacksThisTurn += 1;
-  return gs;
-}
 
   // Creature vs creature combat
-const defSlot = target.slotIndex as number;
-const defender = defenderPlayer.board[defSlot];
-if (!defender) {
-  gs.log.push(`No defender in that slot.`);
-  return gs;
-}
-ensureRuntimeFields(defender);
+  const defSlot = target.slotIndex as number;
+  const defender = defenderPlayer.board[defSlot];
+  if (!defender) {
+    gs.log.push(`No defender in that slot.`);
+    return gs;
+  }
+  ensureRuntimeFields(defender);
 
-const defenderAtk = getEffectiveAtk(gs, defPlayerIndex, defSlot);
-const attackerName = attacker.card.name;
-const defenderName = defender.card.name;
+  const defenderAtk = getEffectiveAtk(gs, defPlayerIndex, defSlot);
+  const attackerName = attacker.card.name;
+  const defenderName = defender.card.name;
 
-const attackerFirst = hasFirstStrike(attackerName);
-const defenderFirst = hasFirstStrike(defenderName);
-const attackerHasPiercing = hasPiercing(attackerName); // Add this
+  const attackerFirst = hasFirstStrike(attackerName);
+  const defenderFirst = hasFirstStrike(defenderName);
+  const attackerHasPiercing = hasPiercing(attackerName);
 
-const attackerHitsFirst = attackerFirst && !defenderFirst;
-const defenderHitsFirst = defenderFirst && !attackerFirst;
+  const attackerHitsFirst = attackerFirst && !defenderFirst;
+  const defenderHitsFirst = defenderFirst && !attackerFirst;
 
-function dealCombatDamageToDefender(amount: number) {
-  const defenderHpBefore = defender.currentHp;
-  
-  applyCreatureDamage(gs, defPlayerIndex, defSlot, amount, false);
-  
-  // Check for Piercing - if defender died, deal excess to player
-  if (attackerHasPiercing) {
+  function dealCombatDamageToDefender(amount: number) {
+    const defenderHpBefore = defender.currentHp;
+    
+    applyCreatureDamage(gs, defPlayerIndex, defSlot, amount, false);
+    
+    // Mark that attacker dealt damage this turn
+    if (amount > 0) {
+      (attacker as any).dealtDamageThisTurn = true;
+    }
+    
+    // Thorns: defender deals damage back to attacker if it took damage
+const defenderStillAlive = defenderPlayer.board[defSlot] !== null;
+    if (defenderStillAlive && amount > 0) {
+      const thornsValue = getKeywordValue(defender.card, "THORNS");
+      if (thornsValue > 0) {
+        applyCreatureDamage(gs, atkPlayerIndex, attackerSlotIndex, thornsValue, false);
+        gs.log.push(`${defenderName} Thorns: ${thornsValue} damage to ${attackerName}.`);
+      }
+    }
+    
+    // Check for Piercing - if defender died, deal excess to player
+    if (attackerHasPiercing) {
+      const defenderAfter = defenderPlayer.board[defSlot];
+      if (!defenderAfter) {
+        // Defender died - calculate excess damage
+        const excessDamage = amount - defenderHpBefore;
+        if (excessDamage > 0) {
+          defenderPlayer.life -= excessDamage;
+          gs.log.push(`Piercing: ${excessDamage} excess damage dealt to ${defenderPlayer.name}.`);
+        }
+      }
+    }
+    
+    // Check for extra attack on kill effect
     const defenderAfter = defenderPlayer.board[defSlot];
-    if (!defenderAfter) {
-      // Defender died - calculate excess damage
-      const excessDamage = amount - defenderHpBefore;
-      if (excessDamage > 0) {
-        defenderPlayer.life -= excessDamage;
-        gs.log.push(`Piercing: ${excessDamage} excess damage dealt to ${defenderPlayer.name}.`);
+    if (!defenderAfter && defenderHpBefore > 0) {
+      // Defender was killed
+      (attacker as any).killedCreatureThisTurn = true;
+      
+      const effects = cardRegistry.getEffects(attacker.card.name);
+      const extraAttackEffect = effects.find(e => e.customScript === "EXTRA_ATTACK_ON_KILL");
+      if (extraAttackEffect) {
+        (attacker as any).attacksThisTurn = Math.max(0, (attacker as any).attacksThisTurn - 1);
+        gs.log.push(`${attackerName} may attack again!`);
       }
     }
   }
-}
 
-function dealCombatDamageToAttacker(amount: number) {
-  applyCreatureDamage(gs, atkPlayerIndex, attackerSlotIndex, amount, false);
-}
+  function dealCombatDamageToAttacker(amount: number) {
+    applyCreatureDamage(gs, atkPlayerIndex, attackerSlotIndex, amount, false);
+    
+    // Thorns: attacker deals damage back to defender if it took damage
+    const attackerStillAlive = attackerPlayer.board[attackerSlotIndex] !== null;
+    if (attackerStillAlive && amount > 0) {
+      const thornsValue = getKeywordValue(attacker.card, "THORNS");
+      if (thornsValue > 0) {
+        applyCreatureDamage(gs, defPlayerIndex, defSlot, thornsValue, false);
+        gs.log.push(`${attackerName} Thorns: ${thornsValue} damage to ${defenderName}.`);
+      }
+    }
+  }
 
-// Apply combat damage based on first strike
-if (attackerHitsFirst) {
-  dealCombatDamageToDefender(attackerAtk);
-  if (!defenderPlayer.board[defSlot]) {
-    gs.log.push(`${attackerName} (First Strike) kills ${defenderName} before it can strike back.`);
+  // Apply combat damage based on first strike
+  if (attackerHitsFirst) {
+    dealCombatDamageToDefender(attackerAtk);
+    if (!defenderPlayer.board[defSlot]) {
+      gs.log.push(`${attackerName} (First Strike) kills ${defenderName} before it can strike back.`);
+    } else {
+      dealCombatDamageToAttacker(defenderAtk);
+    }
+  } else if (defenderHitsFirst) {
+    dealCombatDamageToAttacker(defenderAtk);
+    if (!attackerPlayer.board[attackerSlotIndex]) {
+      gs.log.push(`${defenderName} (First Strike) kills ${attackerName} before it can strike back.`);
+    } else {
+      dealCombatDamageToDefender(attackerAtk);
+    }
   } else {
+    // Simultaneous damage
+    dealCombatDamageToDefender(attackerAtk);
     dealCombatDamageToAttacker(defenderAtk);
   }
-} else if (defenderHitsFirst) {
-  dealCombatDamageToAttacker(defenderAtk);
-  if (!attackerPlayer.board[attackerSlotIndex]) {
-    gs.log.push(`${defenderName} (First Strike) kills ${attackerName} before it can strike back.`);
-    // Even if attacker dies, piercing still applies if defender was killed
-  } else {
-    dealCombatDamageToDefender(attackerAtk);
-  }
-} else {
-  // Simultaneous damage - apply defender damage first so piercing can check
-  dealCombatDamageToDefender(attackerAtk);
-  dealCombatDamageToAttacker(defenderAtk);
-  // Piercing already applied in dealCombatDamageToDefender, even if attacker dies after
-}
 
   bcAny.attacksThisTurn += 1;
 
@@ -1482,39 +1559,6 @@ function handleFirstSpellThisTurn(gs: GameState, playerIndex: number) {
     };
     gs.log.push(`Catalyst resolves: you discard ${catalystCount === 1 ? '1 card' : catalystCount + ' cards'}.`);
   }
-}
-
-function triggerDrawThenDiscardChoice(
-  gs: GameState,
-  playerIndex: number,
-  source: string
-) {
-  const player = gs.players[playerIndex];
-
-  drawCard(player);
-
-  if (player.hand.length === 0) {
-    gs.log.push(
-      `${source} triggers: you draw 1 (no card to discard).`
-    );
-    return;
-  }
-
-  if (gs.pendingDiscard) {
-    gs.log.push(
-      `${source} would make you discard, but a discard choice is already pending.`
-    );
-    return;
-  }
-
-  gs.pendingDiscard = {
-    playerIndex,
-    source,
-  };
-
-  gs.log.push(
-    `${source} triggers: choose a card in your hand to discard.`
-  );
 }
 
 export function castSpell(state: GameState, handCardId: string, target?: SpellTarget): GameState {
@@ -1713,6 +1757,7 @@ function canPlayEvolution(
   slotIndex: number
 ): boolean {
   const player = gs.players[gs.activePlayerIndex];
+  const enemy = gs.players[1 - gs.activePlayerIndex];
   const bc = player.board[slotIndex];
   
   // If slot is empty, any evolution can be played there
@@ -1729,14 +1774,14 @@ function canPlayEvolution(
   }
   
   // Check "has taken damage" requirement
-  if (text.includes("has taken damage") || text.includes("taken damage but survived")) {
+  if (text.includes("has taken damage")) {
     const maxHp = (bc.card as any).hp || 0;
     const damageTaken = maxHp - bc.currentHp;
     if (damageTaken <= 0) return false;
   }
   
-  // Check "has full HP" or "full HP" requirement
-  if (text.includes("full hp") || text.includes("has full hp")) {
+  // Check "has full hp" requirement
+  if (text.includes("has full hp")) {
     const maxHp = (bc.card as any).hp || 0;
     if (bc.currentHp !== maxHp) return false;
   }
@@ -1745,18 +1790,21 @@ function canPlayEvolution(
   const spellsMatch = text.match(/cast[ed]?\s+(\d+)\s+or more spells/);
   if (spellsMatch) {
     const required = parseInt(spellsMatch[1]);
-    const pAny = player as any;
-    const spellsCast = pAny.spellsCastThisTurn || 0;
+    const spellsCast = player.spellsCastThisTurn || 0;
     if (spellsCast < required) return false;
   }
   
   // Check "dealt damage this turn"
   if (text.includes("dealt damage this turn")) {
-    const bcAny = bc as any;
-    if (!bcAny.dealtDamageThisTurn) return false;
+    if (!(bc as any).dealtDamageThisTurn) return false;
   }
   
-  // Check "X or more creatures in your graveyard"
+  // Check "killed a creature this turn"
+  if (text.includes("killed a creature this turn")) {
+    if (!(bc as any).killedCreatureThisTurn) return false;
+  }
+  
+  // Check "X or more creatures in graveyard"
   const graveyardMatch = text.match(/(\d+)\s+or more creatures in (?:your )?graveyard/);
   if (graveyardMatch) {
     const required = parseInt(graveyardMatch[1]);
@@ -1764,6 +1812,23 @@ function canPlayEvolution(
       c => c.kind === "CREATURE" || c.kind === "EVOLUTION"
     ).length;
     if (creaturesInGraveyard < required) return false;
+  }
+  
+  // Check "if your life is lower than your opponent's"
+  if (text.includes("if your life is lower than your opponent's")) {
+    if (player.life >= enemy.life) return false;
+  }
+  
+  // Check "if you healed this turn"
+  if (text.includes("if you healed this turn")) {
+    if (!(player as any).healedThisTurn) return false;
+  }
+  
+  // Check "if your life is X or less"
+  const lifeThresholdMatch = text.match(/if your life is (\d+) or less/);
+  if (lifeThresholdMatch) {
+    const threshold = parseInt(lifeThresholdMatch[1]);
+    if (player.life > threshold) return false;
   }
   
   return true;

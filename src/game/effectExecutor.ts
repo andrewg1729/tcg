@@ -31,6 +31,12 @@ export class EffectExecutor {
       case "ON_DAMAGE":
         this.executeImmediateEffect(gs, effect, sourcePlayerIndex, target);
         break;
+      case "START_OF_TURN":
+        this.executeImmediateEffect(gs, effect, sourcePlayerIndex, target);
+        break;
+      case "END_OF_TURN":
+  this.executeImmediateEffect(gs, effect, sourcePlayerIndex, target);
+  break;
       case "DEATH":
         this.executeDeathEffect(gs, effect, sourcePlayerIndex);
         break;
@@ -273,22 +279,31 @@ private executeOnPlayEffect(
   }
 }
 
-  private executeOnAttackEffect(
-    gs: GameState,
-    effect: CardEffect,
-    playerIndex: number
-  ): void {
-    const enemy = gs.players[1 - playerIndex];
-    
-    // Handle damage to all enemy creatures
-    if (effect.damage !== undefined && effect.targetType === "ALL_ENEMY") {
-      enemy.board.forEach((bc, idx) => {
-        if (bc) {
-          this.applyDamageToCreature(gs, 1 - playerIndex, idx, effect.damage!, false);
-        }
-      });
-    }
+private executeOnAttackEffect(
+  gs: GameState,
+  effect: CardEffect,
+  playerIndex: number
+): void {
+  const player = gs.players[playerIndex];
+  const enemy = gs.players[1 - playerIndex];
+  
+  // Handle damage to all enemy creatures
+  if (effect.damage !== undefined && effect.targetType === "ALL_ENEMY") {
+    enemy.board.forEach((bc, idx) => {
+      if (bc) {
+        this.applyDamageToCreature(gs, 1 - playerIndex, idx, effect.damage!, false);
+      }
+    });
   }
+  
+  // Handle draw
+  if (effect.draw !== undefined && effect.draw > 0) {
+    for (let i = 0; i < effect.draw; i++) {
+      this.drawCard(player);
+    }
+    gs.log.push(`${player.name} draws ${effect.draw} card(s).`);
+  }
+}
   
   private executeDeathEffect(
     gs: GameState,

@@ -53,6 +53,7 @@ export interface KeywordEffect {
   // Static keywords (always active)
   armor?: number;
   regen?: number;
+  thorns?: number; // Add this
   guard?: boolean;
   lifetap?: boolean;
   piercing?: boolean;

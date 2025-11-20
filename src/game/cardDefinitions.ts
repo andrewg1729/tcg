@@ -405,19 +405,12 @@ export const waterCardDefinitions: CardDefinition[] = [
   requiredRank: 2,
   atk: 5,
   hp: 9,
-  text: "Evolve from Coral Soldier when it has full HP. Guard. Armor 2. When this takes damage from an attack, deal 1 damage to the attacker.",
+  text: "Evolve from Coral Soldier when it has full HP. Guard. Armor 2. Thorns 1.",
   imagePath: "/cards/water/Coral General.png",
   keywords: [
     { keyword: "GUARD", guard: true },
     { keyword: "ARMOR", armor: 2 },
-  ],
-  effects: [
-    {
-      timing: "ON_DAMAGE",
-      targetType: "TARGET_CREATURE",
-      damage: 1,
-      customScript: "DAMAGE_ATTACKER",
-    },
+    { keyword: "THORNS", thorns: 1 }, // Add this
   ],
 },
 
@@ -821,7 +814,7 @@ export const fireCardDefinitions: CardDefinition[] = [
   requiredRank: 2,
   atk: 6,
   hp: 10,
-  text: "Evolve from Scorchog when it has taken damage but survived. Armor 1. Regen 2. When this takes damage, deal 1 damage to all enemy creatures.",
+  text: "Evolve from Scorchog if it has taken damage. Armor 1. Regen 2. When this takes damage, deal 1 damage to all enemy creatures.",
   imagePath: "/cards/fire/Moltusk.png",
   keywords: [
     { keyword: "ARMOR", armor: 1 },
@@ -862,7 +855,7 @@ export const fireCardDefinitions: CardDefinition[] = [
   requiredRank: 1,
   atk: 7,
   hp: 4,
-  text: "Evolve from Embercrack Duelist if it killed a creature in combat this turn. First Strike. Double Strike. When this kills a creature, it may attack again this turn.",
+  text: "Evolve from Embercrack Duelist if it killed a creature this turn. First Strike. Double Strike. When this kills a creature, it may attack again this turn.",
   imagePath: "/cards/fire/Embercrack Bladelord.png",
   keywords: [
     { keyword: "FIRST_STRIKE", firstStrike: true },
@@ -885,7 +878,7 @@ export const fireCardDefinitions: CardDefinition[] = [
   requiredRank: 1,
   atk: 5,
   hp: 6,
-  text: "Evolve from Prismflare Beetle if you've healed this turn. Lifetap. Regen 1. When this deals damage to the enemy, deal 2 damage to a random enemy creature.",
+  text: "Evolve from Prismflare Beetle if you healed this turn. Lifetap. Regen 1. At the start of your turn, heal 1.",
   imagePath: "/cards/fire/Prismflare Colossus.png",
   keywords: [
     { keyword: "LIFETAP", lifetap: true },
@@ -893,10 +886,9 @@ export const fireCardDefinitions: CardDefinition[] = [
   ],
   effects: [
     {
-      timing: "ON_DAMAGE",
-      targetType: "TARGET_CREATURE",
-      damage: 2,
-      customScript: "RANDOM_ENEMY_ON_PLAYER_HIT",
+      timing: "START_OF_TURN",
+      targetType: "SELF_PLAYER",
+      heal: 1,
     },
   ],
 },
@@ -909,7 +901,7 @@ export const fireCardDefinitions: CardDefinition[] = [
   requiredRank: 3,
   atk: 9,
   hp: 12,
-  text: "Drop-In Evolution: If your life is 10 or less. Guard. Armor 2. At the end of your turn, deal 1 damage to all enemy creatures.",
+  text: "If your life is 10 or less. Guard. Armor 2. At the end of your turn, deal 1 damage to all enemy creatures.",
   imagePath: "/cards/fire/Scorvane - The Ash King.png",
   keywords: [
     { keyword: "GUARD", guard: true },
