@@ -16,11 +16,15 @@ export const PlayerHUD: React.FC<PlayerHUDProps> = ({
   onClickPortrait,
 }) => {
   return (
-    <div className={`player-hud ${isTop ? "player-hud-top" : "player-hud-bottom"}`}>
+    <div
+      className={`player-hud ${
+        isTop ? "player-hud-top" : "player-hud-bottom"
+      }`}
+    >
       <div
-        className={`player-portrait ${isActive ? "player-portrait-active" : ""} ${
-          onClickPortrait ? "player-portrait-clickable" : ""
-        }`}
+        className={`player-portrait ${
+          isActive ? "player-portrait-active" : ""
+        } ${onClickPortrait ? "player-portrait-clickable" : ""}`}
         onClick={onClickPortrait}
       >
         <div className="player-name">{player.name}</div>
@@ -38,12 +42,6 @@ export const PlayerHUD: React.FC<PlayerHUDProps> = ({
         <div className="zone-pill">
           Grave
           <span className="zone-count">{player.graveyard.length}</span>
-        </div>
-        <div className="zone-pill">
-          Location
-          <span className="zone-slot">
-            {player.location ? player.location.name : "—"}
-          </span>
         </div>
       </div>
     </div>

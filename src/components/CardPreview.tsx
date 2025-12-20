@@ -15,7 +15,7 @@ interface CardPreviewProps {
 
 // Keyword explanations
 const KEYWORD_TOOLTIPS: Record<string, string> = {
-  GUARD: "Enemies must attack this creature first while it lives.",
+  GUARD: "This creature can be declared as a blocker when an attack is pending.",
   ARMOR: "Reduces all incoming damage by X.",
   REGEN: "Heals X HP at the start of your turn.",
   SPELL_SHIELD: "The first enemy spell that targets this creature is negated.",
@@ -33,7 +33,7 @@ const KEYWORD_TOOLTIPS: Record<string, string> = {
   VIGILANT: "This creature can attack twice per turn.",
   SWIFT: "Does not have summoning sickness (can attack immediately).",
   DEATH: "Triggers an effect when this creature dies.",
-    THORNS: "When this creature takes damage from an attack, deal X damage back to the attacker.",
+  THORNS: "When this creature takes damage from an attack, deal X damage back to the attacker.",
 };
 
 export const CardPreview: React.FC<CardPreviewProps> = ({ 
@@ -259,12 +259,11 @@ export const CardPreview: React.FC<CardPreviewProps> = ({
         <div className="card-preview-header">
           <h3 className="card-preview-name">{actualCard.name}</h3>
           <div className="card-preview-type">
-            {actualCard.kind === "CREATURE" && `Rank ${(actualCard as CreatureCard).rank} Creature`}
+{actualCard.kind === "CREATURE" && `Tier ${(actualCard as CreatureCard).tier} Creature`}
             {actualCard.kind === "EVOLUTION" && "Evolution"}
             {actualCard.kind === "FAST_SPELL" && "Fast Spell"}
             {actualCard.kind === "SLOW_SPELL" && "Slow Spell"}
             {actualCard.kind === "RELIC" && "Relic"}
-            {actualCard.kind === "LOCATION" && "Location"}
           </div>
         </div>
 
@@ -299,11 +298,11 @@ export const CardPreview: React.FC<CardPreviewProps> = ({
           <div className="card-preview-active-effects">
             <h4>Active Effects:</h4>
             <div className="effect-list">
-              {(boardCreature as any).frozenForTurns > 0 && (
-                <div className="effect-item frozen">
-                  Frozen ({(boardCreature as any).frozenForTurns} turns)
-                </div>
-              )}
+{(boardCreature as any).stunnedForTurns > 0 && (
+  <div className="effect-item stunned">
+    Stunned ({(boardCreature as any).stunnedForTurns} turns)
+  </div>
+)}
               {(boardCreature as any).preventedDamage > 0 && (
                 <div className="effect-item shield">
                   Shield ({(boardCreature as any).preventedDamage} damage prevented)

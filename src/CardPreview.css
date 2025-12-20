@@ -166,7 +166,7 @@
   border: 1px solid;
 }
 
-.effect-item.frozen {
+.effect-item.stunned {
   background: rgba(115, 192, 222, 0.15);
   border-color: rgba(115, 192, 222, 0.4);
   color: #74c0fc;

@@ -826,3 +826,18 @@ body {
 .cancel-target-btn:active {
   transform: translateY(0);
 }
+
+/* index.css or BoardStage.css */
+.pixi-board-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 0; /* Behind everything */
+  pointer-events: none; /* Don't block UI */
+}
+
+.board-mat,
+.game-main-area,
+.game-root-with-preview {
+  position: relative;
+  z-index: 1; /* Ensure UI sits above PIXI */
+}

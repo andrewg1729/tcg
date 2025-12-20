@@ -1,6 +1,6 @@
 // src/components/HandSection.tsx
 import React from "react";
-import { MainDeckCard, Phase, SpellCard, RelicCard, LocationCard } from "../game/types";
+import { MainDeckCard, Phase, SpellCard } from "../game/types";
 import { HandCard } from "./HandCard";
 
 interface HandSectionProps {
@@ -11,7 +11,6 @@ interface HandSectionProps {
   onPlayCreature: (card: MainDeckCard, slotIndex: number) => void;
   onCastSpell: (card: SpellCard) => void;
   onPlayRelic: (cardId: string) => void;
-  onPlayLocation: (card: LocationCard) => void;
   onDiscard: (cardId: string) => void;
   onMouseEnter: (card: MainDeckCard) => void;
 }
@@ -24,7 +23,6 @@ export const HandSection: React.FC<HandSectionProps> = ({
   onPlayCreature,
   onCastSpell,
   onPlayRelic,
-  onPlayLocation,
   onDiscard,
   onMouseEnter,
 }) => {
@@ -46,11 +44,6 @@ export const HandSection: React.FC<HandSectionProps> = ({
             }
             onPlayRelic={
               card.kind === "RELIC" ? () => onPlayRelic(card.id) : undefined
-            }
-            onPlayLocation={
-              card.kind === "LOCATION"
-                ? () => onPlayLocation(card as LocationCard)
-                : undefined
             }
             index={i}
             total={hand.length}

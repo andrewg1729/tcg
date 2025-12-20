@@ -42,7 +42,7 @@ class CardRegistry {
         return {
           ...baseCard,
           kind: "CREATURE",
-          rank: def.rank!,
+          tier: def.tier!,
           atk: def.atk!,
           hp: def.hp!,
         } as CreatureCard;

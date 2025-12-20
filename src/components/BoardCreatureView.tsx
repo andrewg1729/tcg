@@ -1,6 +1,13 @@
 // src/components/BoardCreatureView.tsx
 import React from "react";
-import { BoardCreature, PlayerState, Phase, CreatureCard, EvolutionCard, GameState } from "../game/types";
+import {
+  BoardCreature,
+  PlayerState,
+  Phase,
+  CreatureCard,
+  EvolutionCard,
+  GameState,
+} from "../game/types";
 import { cardRegistry } from "../game/cardRegistry";
 
 interface BoardCreatureViewProps {
@@ -33,33 +40,36 @@ export const BoardCreatureView: React.FC<BoardCreatureViewProps> = ({
   const card = bc.card as CreatureCard | EvolutionCard;
 
   // Calculate full effective ATK including all bonuses
-  const baseAtk = (card as any).atk ?? 0; // Already includes relic bonus!
+  const baseAtk = (card as any).atk ?? 0; // already includes relic bonus
   const tempAtkBuff = (bc as any).tempAtkBuff ?? 0;
-  
+
   // Calculate Awaken bonus
   const enemyIndex = playerIndex === 0 ? 1 : 0;
-  const hasAwaken = cardRegistry.getKeywords(card.name).some(kw => kw.keyword === "AWAKEN");
-  const awakenBonus = hasAwaken && player.life < gameState.players[enemyIndex].life ? 1 : 0;
-  
+  const hasAwaken = cardRegistry
+    .getKeywords(card.name)
+    .some((kw) => kw.keyword === "AWAKEN");
+  const awakenBonus =
+    hasAwaken && player.life < gameState.players[enemyIndex].life ? 1 : 0;
+
   const displayAtk = baseAtk + tempAtkBuff + awakenBonus;
 
   return (
     <div
-      className={`board-creature-container ${isValidTarget ? "valid-target" : ""}`}
+      className={`board-creature-container ${
+        isValidTarget ? "valid-target" : ""
+      }`}
       onClick={onClick}
       onMouseEnter={onMouseEnter}
     >
       {/* Card Image */}
       {card.imagePath ? (
-        <img 
-          src={card.imagePath} 
-          alt={card.name} 
+        <img
+          src={card.imagePath}
+          alt={card.name}
           className="board-creature-image"
         />
       ) : (
-        <div className="board-creature-placeholder">
-          {card.name}
-        </div>
+        <div className="board-creature-placeholder">{card.name}</div>
       )}
 
       {/* Overlay with stats and info */}
@@ -73,24 +83,38 @@ export const BoardCreatureView: React.FC<BoardCreatureViewProps> = ({
           <div className="status-indicator summoning-sickness">😴</div>
         )}
 
-        {(bc as any).frozenForTurns > 0 && (
-          <div className="status-indicator frozen">❄️</div>
+        {(bc as any).stunnedForTurns > 0 && (
+          <div className="status-indicator stunned">💫</div>
         )}
       </div>
 
       {/* Action buttons */}
-      {isActiveRow && phase === "ATTACK" && !bc.hasSummoningSickness && onAttack && (
-        <div className="board-creature-actions">
-          <button onClick={(e) => { e.stopPropagation(); onAttack(slotIndex, "PLAYER"); }}>
-            Attack Player
-          </button>
-          {[0, 1, 2].map((idx) => (
-            <button key={idx} onClick={(e) => { e.stopPropagation(); onAttack(slotIndex, idx); }}>
-              Slot {idx + 1}
+      {isActiveRow &&
+        phase === "BATTLE_DECLARE" && // ✅ use battle declare phase
+        !bc.hasSummoningSickness &&
+        onAttack && (
+          <div className="board-creature-actions">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onAttack(slotIndex, "PLAYER");
+              }}
+            >
+              Attack Player
             </button>
-          ))}
-        </div>
-      )}
+            {[0, 1, 2].map((idx) => (
+              <button
+                key={idx}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAttack(slotIndex, idx);
+                }}
+              >
+                Slot {idx + 1}
+              </button>
+            ))}
+          </div>
+        )}
     </div>
   );
 };

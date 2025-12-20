@@ -9,8 +9,12 @@ import {
   Phase,
   RelicCard,
   LocationCard,
+    SpellCard,
+  StackItem,
+  SpellTarget,
+  TargetingRule,
 } from "./types";
-import { waterMainDeck, waterEvolutions, fireMainDeck, fireEvolutions } from "./cards";
+import { runebladeEvolutions,runebladeMainDeck } from "./cards";
 import { cardRegistry } from "./cardRegistry";
 import { effectExecutor } from "./effectExecutor";
 
@@ -81,12 +85,8 @@ function hasLifetap(cardName: string): boolean {
   return hasKeyword(cardName, "LIFETAP");
 }
 
-function baseArmor(cardName: string): number {
-  return getKeywordValue(cardName, "ARMOR");
-}
-
-function baseRegen(cardName: string): number {
-  return getKeywordValue(cardName, "REGEN");
+function hasSwift(cardName: string): boolean {
+  return hasKeyword(cardName, "SWIFT");
 }
 
 function hasPiercing(cardName: string): boolean {
@@ -113,70 +113,148 @@ function hasAwaken(cardName: string): boolean {
   return hasKeyword(cardName, "AWAKEN");
 }
 
-function applyRelicToCreature(bc: BoardCreature, relic: RelicCard) {
+function getRelicCountOnSlotByTag(player: PlayerState, slotIndex: number, tag: string): number {
+  return player.relics.filter(r => 
+    r.slotIndex === slotIndex && 
+    r.relic.name.toLowerCase().includes(tag.toLowerCase())
+  ).length;
+}
+
+function parseSelfRelicBuff(text: string): {
+  relicTag: string;
+  atkBonus: number;
+  hpBonus: number;
+  requiredCount?: number;
+} | null {
+  // Match: "If this has 2 or more Runeblade relics attached, this gains +2 ATK"
+  const countMatch = text.match(/If this has (\d+) or more (\w+) relics attached.*?gains?\s+\+(\d+)(?:\/\+(\d+))?\s*ATK/i);
   
+  if (countMatch) {
+    return {
+      relicTag: countMatch[2],
+      atkBonus: parseInt(countMatch[3], 10),
+      hpBonus: countMatch[4] ? parseInt(countMatch[4], 10) : 0,
+      requiredCount: parseInt(countMatch[1], 10)
+    };
+  }
+  
+  // Match: "If this has a Runeblade relic attached, this gains +1 ATK"
+  const match = text.match(/If this has a (\w+) relic attached.*?gains?\s+\+(\d+)(?:\/\+(\d+))?(?:\s+ATK)?/i);
+  
+  if (!match) return null;
+  
+  return {
+    relicTag: match[1],
+    atkBonus: parseInt(match[2], 10),
+    hpBonus: match[3] ? parseInt(match[3], 10) : 0,
+    requiredCount: 1 // Default to requiring at least 1
+  };
+}
+
+function relicNameMatchesTag(relic: RelicCard, tag: string): boolean {
+  // Check if the relic's name contains the tag (case-insensitive)
+  return relic.name.toLowerCase().includes(tag.toLowerCase());
+}
+
+function getRelicCountOnSlot(player: PlayerState, slotIndex: number): number {
+  return player.relics.filter(r => r.slotIndex === slotIndex).length;
+}
+
+function applyRelicToCreature(bc: BoardCreature, relic: RelicCard) {
   const text = relic.text;
   const card = bc.card as any;
-  
+
   // Ensure card has keywords array
   if (!card.keywords) card.keywords = [];
-  
+
   // Track what this relic added (for removal later)
   if (!card.relicAddedKeywords) card.relicAddedKeywords = [];
   if (!card.relicAddedStats) card.relicAddedStats = { atk: 0, hp: 0 };
-  
+
+  // ----------------------- BASIC STAT BONUSES -----------------------
   // Parse stat bonuses: "+X ATK" or "+X HP"
-  if (text.startsWith('+')) {
+  if (text.startsWith("+")) {
     const atkMatch = text.match(/\+(\d+)\s*ATK/i);
     const hpMatch = text.match(/\+(\d+)\s*HP/i);
-    
+
     if (atkMatch) {
-      const bonus = parseInt(atkMatch[1]);
+      const bonus = parseInt(atkMatch[1], 10);
       card.atk = (card.atk || 0) + bonus;
       card.relicAddedStats.atk += bonus;
     }
     if (hpMatch) {
-      const bonus = parseInt(hpMatch[1]);
+      const bonus = parseInt(hpMatch[1], 10);
       card.hp = (card.hp || 0) + bonus;
       bc.currentHp += bonus;
       card.relicAddedStats.hp += bonus;
     }
   }
-  
+
+  // ----------------------- GRANTED KEYWORDS -----------------------
   // Parse granted keywords: "Grant X"
-  if (text.startsWith('Grant')) {
+  if (text.startsWith("Grant")) {
     const grantMatch = text.match(/Grant\s+(.+?)(?:\.|$)/i);
-    
+
     if (grantMatch) {
       const grantedEffect = grantMatch[1].trim();
-      
-      // Keyword with value (e.g., "Armor 2", "Regen 1")
+
+      // Keyword with value (e.g., "Armor 2", "Regen 1", "Surge 2")
       const keywordWithValueMatch = grantedEffect.match(/^(\w+(?:\s+\w+)?)\s+(\d+)$/);
       // Keyword without value (e.g., "Double Strike", "Guard")
       const keywordOnlyMatch = grantedEffect.match(/^(\w+(?:\s+\w+)?)$/);
-      
+
       if (keywordWithValueMatch) {
-        const keyword = keywordWithValueMatch[1].toUpperCase().replace(/\s+/g, '_');
-        const value = parseInt(keywordWithValueMatch[2]);
-                
+        const keyword = keywordWithValueMatch[1].toUpperCase().replace(/\s+/g, "_");
+        const value = parseInt(keywordWithValueMatch[2], 10);
+
         const keywordObj: any = { keyword };
         if (keyword === "ARMOR") keywordObj.armor = value;
         else if (keyword === "REGEN") keywordObj.regen = value;
         else if (keyword === "SURGE") keywordObj.surge = value;
-        
+        else if (keyword === "THORNS") keywordObj.thorns = value;
+
         card.keywords.push(keywordObj);
         card.relicAddedKeywords.push(keywordObj);
       } else if (keywordOnlyMatch) {
-        const keyword = keywordOnlyMatch[1].toUpperCase().replace(/\s+/g, '_');
-        
+        const keyword = keywordOnlyMatch[1].toUpperCase().replace(/\s+/g, "_");
         const keywordObj = { keyword };
         card.keywords.push(keywordObj);
         card.relicAddedKeywords.push(keywordObj);
       }
     }
   }
+
+  // ----------------------- CREATURE-SIDE SYNERGY -----------------------
+  // e.g. creature text:
+  //  "If this has a Runeblade relic attached, this gains +1 ATK."
+  //  "If this has a Dragon relic attached, this gains +1/+1."
+// In applyRelicToCreature, replace the creature-side synergy section:
+const creatureText = (card.text || "") as string;
+const relicBuff = parseSelfRelicBuff(creatureText);
+if (relicBuff) {
+  const { relicTag, atkBonus, hpBonus, requiredCount = 1 } = relicBuff;
   
+  // Count matching relics on this slot
+  const matchingRelicCount = player.relics.filter(r => 
+    r.slotIndex === slotIndex && 
+    relicNameMatchesTag(r.relic, relicTag)
+  ).length;
+  
+  // Check if we meet the count requirement
+  if (matchingRelicCount >= requiredCount) {
+    if (atkBonus > 0) {
+      card.atk = (card.atk || 0) + atkBonus;
+      card.relicAddedStats.atk += atkBonus;
+    }
+    if (hpBonus > 0) {
+      card.hp = (card.hp || 0) + hpBonus;
+      bc.currentHp += hpBonus;
+      card.relicAddedStats.hp += hpBonus;
+    }
+  }
 }
+}
+
 
 function removeAllRelicsFromCreature(bc: BoardCreature) {
   const card = bc.card as any;
@@ -195,6 +273,66 @@ function removeAllRelicsFromCreature(bc: BoardCreature) {
     });
     card.relicAddedKeywords = [];
   }
+}
+
+export function applyRegenHealing(gs: GameState, playerIndex: number, slotIndex: number, amount: number): void {
+  effectExecutor.executeEffect(gs, {
+    timing: "IMMEDIATE",
+    targetType: "TARGET_CREATURE",
+    heal: amount
+  }, playerIndex, {
+    type: "CREATURE",
+    playerIndex: playerIndex,
+    slotIndex: slotIndex
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Tier / turn gating (new rules)
+// ---------------------------------------------------------------------------
+
+// Map global turnNumber → max Tier you’re allowed to summon
+function getMaxTierForTurn(turnNumber: number): number {
+  // Turns 1–4 (each player gets two turns) → Tier 1 only
+  if (turnNumber <= 4) return 1;
+
+  // Turns 5–8 → Tier 2 unlocked (each player has now had four turns total)
+  if (turnNumber <= 8) return 2;
+
+  // Turns 9–12 → Tier 3 unlocked
+  if (turnNumber <= 12) return 3;
+
+  // Turn 13+ → Tier 4 unlocked
+  return 4;
+}
+
+// Used for log messages like “Tier 2 is locked until turn 5.”
+function getEarliestTurnForTier(tier: number): number {
+  switch (tier) {
+    case 1: return 1;   // Tier 1 available from turn 1
+    case 2: return 5;   // Tier 2 from turn 5
+    case 3: return 9;   // Tier 3 from turn 9
+    default: return 13; // Tier 4+ from turn 13
+  }
+}
+
+// New rule: can you summon this creature right now, ignoring board slots?
+function canSummonCreatureByTier(
+  gs: GameState,
+  creature: CreatureCard
+): { ok: boolean; reason?: string } {
+  const tier = creature.tier; // using rank as Tier
+  const maxTier = getMaxTierForTurn(gs.turnNumber);
+
+  if (tier <= maxTier) {
+    return { ok: true };
+  }
+
+  const earliestTurn = getEarliestTurnForTier(tier);
+  return {
+    ok: false,
+    reason: `Cannot summon ${creature.name}: Tier ${tier} is locked until turn ${earliestTurn}.`,
+  };
 }
 
 // Check if a target is valid based on the rule
@@ -305,8 +443,9 @@ export function cancelPendingTarget(state: GameState): GameState {
     }
   }
   
-  // Clear the pending target
+  // Clear the pending target and pending sacrifice
   gs.pendingTarget = undefined;
+  gs.pendingSacrificeSummon = null; // if you’re still keeping that field in GameState
   
   return gs;
 }
@@ -319,7 +458,7 @@ function ensureRuntimeFields(creature: BoardCreature) {
   const c = creature as any;
   if (c.tempAtkBuff === undefined) c.tempAtkBuff = 0;
   if (c.preventedDamage === undefined) c.preventedDamage = 0;
-  if (c.frozenForTurns === undefined) c.frozenForTurns = 0;
+if (c.stunnedForTurns === undefined) c.stunnedForTurns = 0;
   if (c.attacksThisTurn === undefined) c.attacksThisTurn = 0;
   if (c.spellShield === undefined) c.spellShield = hasSpellShield(creature.card.name);
 }
@@ -404,8 +543,8 @@ function createInitialPlayer(
 }
 
 export function createInitialGameState(): GameState {
-  const p1 = createInitialPlayer("Water", waterMainDeck, waterEvolutions);
-  const p2 = createInitialPlayer("Fire", fireMainDeck, fireEvolutions);
+  const p1 = createInitialPlayer("Player 1", runebladeMainDeck, runebladeEvolutions);
+  const p2 = createInitialPlayer("Player 2", runebladeMainDeck, runebladeEvolutions);
 
   // Draw 5 cards each (starting hand)
   for (let i = 0; i < 5; i++) {
@@ -413,14 +552,19 @@ export function createInitialGameState(): GameState {
     drawCard(p2);
   }
 
-  const state: GameState = {
-    players: [p1, p2],
-    activePlayerIndex: 0,
-    phase: "MAIN",
-    turnNumber: 1,
-    log: ["Game start."],
-    pendingDiscard: null,
-  };
+const state: GameState = {
+  players: [p1, p2],
+  activePlayerIndex: 0,
+  phase: "MAIN",
+  turnNumber: 1,
+  log: ["Game start."],
+  pendingDiscard: null,
+  pendingCombat: null,
+  stack: [],
+  priorityPlayerIndex: 0,
+  priorityPassCount: 0,
+};
+
 
   // Start the first turn: extra draw + upkeep, but stay in MAIN
   startTurn(state);
@@ -443,23 +587,19 @@ function startTurn(gs: GameState): void {
   gs.log.push(`Turn ${gs.turnNumber}: ${current.name} draws a card.`);
 
   // Reset summoning sickness, attacks, apply Regen and Surge, decrement freeze
-  current.board.forEach((bc, idx) => {
-    if (!bc) return;
-    ensureRuntimeFields(bc);
-    bc.hasSummoningSickness = false;
+current.board.forEach((bc, idx) => {
+  if (!bc) return;
+  ensureRuntimeFields(bc);
+  bc.hasSummoningSickness = false;
   (bc as any).dealtDamageThisTurn = false;
-  (bc as any).killedCreatureThisTurn = false; // Add this
+  (bc as any).killedCreatureThisTurn = false;
   (bc as any).attacksThisTurn = 0;
 
-    const regen = getRegen(gs, gs.activePlayerIndex, idx);
+const regen = getRegen(gs, gs.activePlayerIndex, idx);
 
-    if (regen > 0) {
-      bc.currentHp = Math.min(
-        bc.currentHp + regen,
-        (bc.card as any).hp
-      );
-      gs.log.push(`${bc.card.name} regenerates ${regen} HP.`);
-    }
+if (regen > 0) {
+  applyRegenHealing(gs, gs.activePlayerIndex, idx, regen);
+}
 
     // Surge - apply temporary ATK buff
     const surgeValue = getKeywordValue(bc.card, "SURGE");
@@ -468,10 +608,10 @@ function startTurn(gs: GameState): void {
       gs.log.push(`${bc.card.name} gains Surge +${surgeValue} ATK this turn.`);
     }
 
-    // Frozen turns
-    if ((bc as any).frozenForTurns > 0) {
-      (bc as any).frozenForTurns -= 1;
-    }
+// Stun duration
+if ((bc as any).stunnedForTurns > 0) {
+  (bc as any).stunnedForTurns -= 1;
+}
   });
 
   (current as any).healedThisTurn = false;
@@ -506,18 +646,19 @@ export function endPhase(state: GameState): GameState {
   if (p === "DRAW") {
     gs.phase = "MAIN";
   } else if (p === "MAIN") {
-    gs.phase = "ATTACK";
-  } else if (p === "ATTACK") {
+    // Move into the Battle / Declare Attacks phase
+    gs.phase = "BATTLE_DECLARE";
+  } else if (p === "BATTLE_DECLARE") {
+    // Done with combat → End Phase
     gs.phase = "END";
   } else if (p === "END") {
     const current = gs.players[gs.activePlayerIndex];
-    
+
     triggerEndOfTurnEffects(gs, gs.activePlayerIndex);
-    
+
     current.board.forEach((bc) => {
       if (!bc) return;
       ensureRuntimeFields(bc);
-      
       (bc as any).tempAtkBuff = 0;
     });
 
@@ -525,123 +666,16 @@ export function endPhase(state: GameState): GameState {
     gs.activePlayerIndex = gs.activePlayerIndex === 0 ? 1 : 0;
 
     startTurn(gs);
-
     gs.phase = "MAIN";
   }
 
   return gs;
 }
 
-// ---------------------------------------------------------------------------
-// Summon HP cost logic (per-card, by name)
-// ---------------------------------------------------------------------------
-
-export function getSummonHpCostForCard(card: CreatureCard): number {
-  if (card.rank === 1) return 0;
-
-  // Baseline: Rank 2 = 2 HP, Rank 3 = 4 HP
-  let base = card.rank === 2 ? 2 : 4;
-
-  // Bump costs for especially strong Rank 3s
-  switch (card.name) {
-    // WATER bombs
-    case "Stormcall Leviathan":
-    case "Tidal Goliath":
-    case "Abyssal Charger":
-      return 5;
-
-    // FIRE bombs
-    case "Blazewreak Titan":
-    case "Hellfire Charger":
-    case "Volcanic Enforcer":
-      return 5;
-
-    default:
-      return base;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // HP Sacrifice Summoning
 // ---------------------------------------------------------------------------
-
-function totalSacHp(player: PlayerState): number {
-  return player.board.reduce((sum, bc) => (bc ? sum + bc.currentHp : sum), 0);
-}
-
-function canSummonCreature(card: CreatureCard, player: PlayerState): boolean {
-  if (card.rank === 1) return true;
-  const cost = getSummonHpCostForCard(card);
-  return totalSacHp(player) >= cost;
-}
-
-function performSummonWithSacrifice(
-  gs: GameState,
-  playerIndex: number,
-  creature: CreatureCard,
-  slotIndex: number
-): string {
-  const player = gs.players[playerIndex];
-  const cost = getSummonHpCostForCard(creature);
-  let remaining = cost;
-
-  // Build candidate list
-  const candidates = player.board
-    .map((bc, idx) => ({ bc, idx }))
-    .filter((x) => x.bc)
-    .sort((a, b) => {
-      const aIsTarget = a.idx === slotIndex ? -1 : 0;
-      const bIsTarget = b.idx === slotIndex ? -1 : 0;
-      if (aIsTarget !== bIsTarget) {
-        return aIsTarget - bIsTarget;
-      }
-      return a.bc!.currentHp - b.bc!.currentHp;
-    });
-
-  const sacrificedNames: string[] = [];
-
-for (const { bc, idx } of candidates) {
-  if (!bc || remaining <= 0) break;
-  remaining -= bc.currentHp;
-  sacrificedNames.push(bc.card.name);
-  
-  // Trigger death effects
-  triggerDeathEffects(gs, playerIndex, idx);
-  
-  // Send relics to graveyard
-  const attachedRelics = player.relics.filter(r => r.slotIndex === idx);
-  attachedRelics.forEach(relicData => {
-    player.graveyard.push(relicData.relic);
-  });
-  player.relics = player.relics.filter(r => r.slotIndex !== idx);
-  
-  player.graveyard.push(bc.card);
-  player.board[idx] = null;
-}
-
-  if (remaining > 0) {
-    return `Not enough HP to summon ${creature.name}.`;
-  }
-
-  // Now place the new creature
-  const bc: BoardCreature = {
-    card: creature,
-    currentHp: creature.hp,
-    hasSummoningSickness: true,
-  };
-  ensureRuntimeFields(bc);
-
-  // Apply on-summon effects
-  applySpellShield(bc);
-
-  player.hand = player.hand.filter((c) => c.id !== creature.id);
-  player.board[slotIndex] = bc;
-
-  // Trigger ON_PLAY effects
-  triggerOnPlayEffects(gs, playerIndex, slotIndex);
-
-  return `Sacrificed [${sacrificedNames.join(", ")}] to summon ${creature.name}.`;
-}
 
 export function playCreature(
   state: GameState,
@@ -652,6 +686,7 @@ export function playCreature(
   const playerIndex = gs.activePlayerIndex;
   const player = gs.players[playerIndex];
 
+  // Board bounds
   if (slotIndex < 0 || slotIndex > 2) return gs;
 
   const card = player.hand.find((c) => c.id === handCardId);
@@ -659,154 +694,48 @@ export function playCreature(
 
   const creature = card as CreatureCard;
 
-  if (creature.rank === 1 && player.board[slotIndex]) {
+  // New rule: you can only summon into an EMPTY slot.
+  // Overwriting is handled by Evolutions, not summoning.
+  if (player.board[slotIndex]) {
     gs.log.push(`Slot ${slotIndex + 1} is not empty.`);
     return gs;
   }
 
-  if (!canSummonCreature(creature, player)) {
-    gs.log.push(`Cannot summon ${creature.name}: not enough HP to sacrifice.`);
-    return gs;
-  }
-
-  if (creature.rank === 1) {
-    const bc: BoardCreature = {
-      card: creature,
-      currentHp: creature.hp,
-      hasSummoningSickness: true,
-    };
-    ensureRuntimeFields(bc);
-
-    player.hand = player.hand.filter((c) => c.id !== card.id);
-    player.board[slotIndex] = bc;
-    gs.log.push(`Summoned ${creature.name}.`);
-
-    // Apply on-summon effects
-    applySurge(gs, bc);
-    applySpellShield(bc);
-    
-    // Trigger ON_PLAY effects
-    triggerOnPlayEffects(gs, playerIndex, slotIndex);
-  } else {
-    const msg = performSummonWithSacrifice(gs, playerIndex, creature, slotIndex);
-    gs.log.push(msg);
-  }
-
-  return gs;
-}
-
-export function summonWithChosenSacrifices(
-  state: GameState,
-  handCardId: string,
-  targetSlot: number,
-  sacrificeSlots: number[]
-): GameState {
-  const gs = cloneState(state);
-  const playerIndex = gs.activePlayerIndex;
-  const player = gs.players[playerIndex];
-
-  if (targetSlot < 0 || targetSlot > 2) return gs;
-
-    // Check if any sacrifice creatures are frozen
-  for (const slotIndex of sacrificeSlots) {
-    const bc = player.board[slotIndex];
-    if (bc && (bc as any).frozenForTurns > 0) {
-      gs.log.push(`${bc.card.name} is Frozen and cannot be sacrificed.`);
-      return gs;
+  // New rule: Tier-gated summoning (no HP sacrifice).
+  const tierCheck = canSummonCreatureByTier(gs, creature);
+  if (!tierCheck.ok) {
+    if (tierCheck.reason) {
+      gs.log.push(tierCheck.reason);
+    } else {
+      gs.log.push(`Cannot summon ${creature.name}: Tier restrictions not met.`);
     }
-  }
-
-  const card = player.hand.find((c) => c.id === handCardId);
-  if (!card || card.kind !== "CREATURE") {
-    gs.log.push("Summon failed: card is not a creature in hand.");
     return gs;
   }
 
-  const creature = card as CreatureCard;
-  if (creature.rank === 1) {
-    gs.log.push("Summon failed: Rank 1 does not use manual sacrifices.");
-    return gs;
-  }
+  // Summon the creature
+const bc: BoardCreature = {
+  card: creature,
+  currentHp: creature.hp,
+  hasSummoningSickness: !hasKeyword(creature, "SWIFT"), 
+};
 
-  const cost = getSummonHpCostForCard(creature);
-
-  const uniqueSlots = Array.from(new Set(sacrificeSlots)).filter(
-    (idx) => idx >= 0 && idx <= 2
-  );
-  
-  if (uniqueSlots.length === 0) {
-    gs.log.push("Summon failed: no sacrifice slots chosen.");
-    return gs;
-  }
-
-  if (player.board[targetSlot] && !uniqueSlots.includes(targetSlot)) {
-    gs.log.push(
-      "Summon failed: to summon into an occupied slot, you must choose that creature as a sacrifice."
-    );
-    return gs;
-  }
-
-  let totalHp = 0;
-  for (const idx of uniqueSlots) {
-    const bc = player.board[idx];
-    if (!bc) {
-      gs.log.push("Summon failed: one of the chosen sacrifice slots is empty.");
-      return gs;
-    }
-    totalHp += bc.currentHp;
-  }
-
-  if (totalHp < cost) {
-    gs.log.push(
-      `Summon failed: chosen sacrifices only provide ${totalHp} HP, but ${cost} HP is required.`
-    );
-    return gs;
-  }
-
-  // Perform sacrifices
-const sacrificedNames: string[] = [];
-for (const idx of uniqueSlots) {
-  const bc = player.board[idx];
-  if (!bc) continue;
-  sacrificedNames.push(bc.card.name);
-  
-  // Trigger death effects
-  triggerDeathEffects(gs, playerIndex, idx);
-  
-  // Send relics to graveyard
-  const attachedRelics = player.relics.filter(r => r.slotIndex === idx);
-  attachedRelics.forEach(relicData => {
-    player.graveyard.push(relicData.relic);
-  });
-  player.relics = player.relics.filter(r => r.slotIndex !== idx);
-  
-  player.graveyard.push(bc.card);
-  player.board[idx] = null;
-}
-
-  // Place new creature
-  const bc: BoardCreature = {
-    card: creature,
-    currentHp: creature.hp,
-    hasSummoningSickness: true,
-  };
   ensureRuntimeFields(bc);
 
+  player.hand = player.hand.filter((c) => c.id !== card.id);
+  player.board[slotIndex] = bc;
+  gs.log.push(`Summoned ${creature.name} (Tier ${creature.rank}).`);
+
+  // Apply on-summon keyword effects
   applySurge(gs, bc);
   applySpellShield(bc);
 
-  player.hand = player.hand.filter((c) => c.id !== creature.id);
-  player.board[targetSlot] = bc;
-
-  gs.log.push(
-    `Sacrificed [${sacrificedNames.join(", ")}] to summon ${creature.name}.`
-  );
-
-  // Trigger ON_PLAY effects
-  triggerOnPlayEffects(gs, playerIndex, targetSlot);
+  // Trigger ON_PLAY card effects (if any)
+  const playerIdx = playerIndex;
+  triggerOnPlayEffects(gs, playerIdx, slotIndex);
 
   return gs;
 }
+
 
 // ---------------------------------------------------------------------------
 // Helper functions for effect triggers
@@ -831,79 +760,70 @@ export function resolveSpellTargeting(
   spellCardId?: string,
   target?: SpellTarget
 ): GameState {
-
-    console.log("=== resolveSpellTargeting called ===");
-  console.log("spellCardId:", spellCardId);
-  console.log("target:", target);
-  console.log("pendingTarget:", state.pendingTarget);
-    console.trace("Call stack:"); // ADD THIS LINE
-
   const gs = cloneState(state);
-  
-  // If we're setting up targeting (no target provided yet)
+
+  // -------------------------------------------------------------------------
+  // STEP 1: Start casting (no target chosen yet)
+  // -------------------------------------------------------------------------
   if (spellCardId && !target) {
-    const player = gs.players[gs.activePlayerIndex];
+    const playerIndex = gs.activePlayerIndex;
+    const player = gs.players[playerIndex];
     const card = player.hand.find(c => c.id === spellCardId);
-    
+
     if (!card || (card.kind !== "FAST_SPELL" && card.kind !== "SLOW_SPELL")) {
       return gs;
     }
-    
-    // Get effects from card registry
+
+    const spellCard = card as SpellCard;
+
+    // Timing check (Fast vs Slow, priority, phase)
+    const timing = canCastSpellNow(gs, playerIndex, spellCard);
+    if (!timing.ok) {
+      gs.log.push(timing.reason || "You cannot cast this spell now.");
+      return gs;
+    }
+
     const effects = cardRegistry.getEffects(card.name);
-    
-    // Determine if targeting is needed based on effect targetType
-const needsTarget = effects.some(e => {
-  // Auto-resolution scripts that don't need targeting
-  const autoResolveScripts = ["SELF_DAMAGE", "RESURRECT_TO_FIELD", "EXCLUDE_SELF"];
-  
-  // If it has an auto-resolve custom script, no targeting needed
-  if (e.customScript && autoResolveScripts.includes(e.customScript)) {
-    return false;
-  }
-  
-  // Otherwise check if it needs user targeting
-  return e.targetType === "TARGET_CREATURE" || e.targetType === "TARGET_PLAYER";
-});
-    
-if (!needsTarget) {
-  console.log("Executing spell immediately (no targeting needed)");
-  
-  // Check if this card is already in graveyard (prevent double execution)
-  const alreadyInGraveyard = player.graveyard.some(c => c.id === spellCardId);
-  if (alreadyInGraveyard) {
-    console.log("Card already in graveyard, skipping duplicate execution");
-    return gs;
-  }
-  
-  // Check if this card is still in hand (prevent double execution)
-  const cardStillInHand = player.hand.find(c => c.id === spellCardId);
-  if (!cardStillInHand) {
-    console.log("Card not in hand, skipping");
-    return gs;
-  }
-  
-  // No targeting needed, cast immediately
-  effects.forEach(effect => {
-    console.log("Executing effect:", effect);
-    effectExecutor.executeEffect(gs, effect, gs.activePlayerIndex, undefined);
-  });
-  
-  // Remove from hand and add to graveyard
-  player.hand = player.hand.filter(c => c.id !== spellCardId);
-  player.graveyard.push(cardStillInHand);
-  markSpellCastAndTriggerCatalyst(gs, gs.activePlayerIndex);
-  
-  return gs;
-}
-    
-    // Determine targeting rule from effects
+
+    // Does any effect actually need a chosen target?
+    const needsTarget = effects.some(e => {
+      const autoResolveScripts = ["SELF_DAMAGE", "RESURRECT_TO_FIELD", "EXCLUDE_SELF"];
+      if (e.customScript && autoResolveScripts.includes(e.customScript)) {
+        return false;
+      }
+      return e.targetType === "TARGET_CREATURE" || e.targetType === "TARGET_PLAYER";
+    });
+
+    // -------------------- NO TARGET NEEDED --------------------
+    if (!needsTarget) {
+      if (spellCard.kind === "FAST_SPELL") {
+        // Fast spell: go straight onto the stack with no explicit target
+        pushFastSpellToStack(gs, playerIndex, spellCard, undefined);
+        gs.log.push(`${card.name} is cast as a Fast spell.`);
+        // Card stays in hand until the stack item resolves (or you can move
+        // it to graveyard at resolution time inside resolveTopOfStack).
+      } else {
+        // Slow spell: resolve immediately, no stack
+        effects.forEach(effect => {
+          effectExecutor.executeEffect(gs, effect, playerIndex, undefined);
+        });
+
+        // Move spell from hand to graveyard
+        player.hand = player.hand.filter(c => c.id !== spellCardId);
+        player.graveyard.push(card);
+        markSpellCastAndTriggerCatalyst(gs, playerIndex);
+        gs.log.push(`${card.name} resolves.`);
+      }
+
+      return gs;
+    }
+
+    // -------------------- TARGET NEEDED: set up pendingTarget --------------------
     let rule: TargetingRule;
-    
-    const firstTargetingEffect = effects.find(e => 
-      e.targetType === "TARGET_CREATURE" || e.targetType === "TARGET_PLAYER"
+    const firstTargetingEffect = effects.find(
+      e => e.targetType === "TARGET_CREATURE" || e.targetType === "TARGET_PLAYER"
     );
-    
+
     if (firstTargetingEffect?.targetType === "TARGET_CREATURE") {
       if (firstTargetingEffect.customScript === "ENEMY_ONLY") {
         rule = { type: "ENEMY_CREATURES" };
@@ -921,73 +841,84 @@ if (!needsTarget) {
     } else {
       rule = { type: "ALL_CREATURES" };
     }
-    
+
     gs.pendingTarget = {
       source: card.name,
       rule,
-      sourcePlayerIndex: gs.activePlayerIndex,
+      sourcePlayerIndex: playerIndex,
       sourceCardId: spellCardId,
       sourceType: "SPELL",
     };
-    
+
     gs.log.push(`${card.name} needs a target. Click a valid target.`);
     return gs;
   }
-  
-  // If we're resolving targeting (target provided)
+
+  // -------------------------------------------------------------------------
+  // STEP 2: Finish casting (target chosen)
+  // -------------------------------------------------------------------------
   if (!gs.pendingTarget || gs.pendingTarget.sourceType !== "SPELL" || !target) {
     return gs;
   }
-  
+
   const { sourcePlayerIndex, sourceCardId, source } = gs.pendingTarget;
-  
+
   if (!sourceCardId) {
     gs.pendingTarget = undefined;
     return gs;
   }
-  
-  const player = gs.players[sourcePlayerIndex];
-  const card = player.hand.find(c => c.id === sourceCardId);
-  
-  if (!card) {
+
+  const caster = gs.players[sourcePlayerIndex];
+  const spellInHand = caster.hand.find(c => c.id === sourceCardId);
+
+  if (!spellInHand || (spellInHand.kind !== "FAST_SPELL" && spellInHand.kind !== "SLOW_SPELL")) {
     gs.pendingTarget = undefined;
     return gs;
   }
-  
-// Execute the spell with the target
-const effects = cardRegistry.getEffects(source);
-console.log("Executing effects in resolution:", effects);
-// Execute each effect with appropriate target
-effects.forEach((effect, index) => {
-  console.log(`Effect ${index} targetType:`, effect.targetType);
-  
-  if (effect.targetType === "TARGET_PLAYER") {
-    console.log("Detected TARGET_PLAYER - targeting enemy");
-    const enemyPlayerIndex = 1 - sourcePlayerIndex;
-    const enemyTarget = {
-      playerIndex: enemyPlayerIndex,
-      slotIndex: "PLAYER" as const
-    };
-    console.log("Calling executeEffect with enemy target:", enemyTarget);
-    effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, enemyTarget);
-  } else if (effect.targetType === "SELF_PLAYER") {  // ADD THIS
-    console.log("Detected SELF_PLAYER - no target needed");
-    effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, undefined);
-  } else {
-    console.log("Not TARGET_PLAYER - using provided target:", target);
-    effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, target);
+
+  const spellCard = spellInHand as SpellCard;
+
+  // Re-check timing (state might have changed while picking target)
+  const timing = canCastSpellNow(gs, sourcePlayerIndex, spellCard);
+  if (!timing.ok) {
+    gs.log.push(timing.reason || "You cannot cast this spell now.");
+    gs.pendingTarget = undefined;
+    return gs;
   }
-});
-  
-  // Remove spell from hand BEFORE clearing pendingTarget
-  player.hand = player.hand.filter(c => c.id !== sourceCardId);
-  player.graveyard.push(card);
-  
-  markSpellCastAndTriggerCatalyst(gs, sourcePlayerIndex);
-  
-  // Clear pending target
+
+  const effects = cardRegistry.getEffects(source);
+
+  // -------------------- FAST SPELL: put on stack with target --------------------
+  if (spellCard.kind === "FAST_SPELL") {
+    pushFastSpellToStack(gs, sourcePlayerIndex, spellCard, target);
+    gs.log.push(`${spellCard.name} is cast as a Fast spell targeting something.`);
+    // Card stays in hand until the stack item actually resolves (inside resolveTopOfStack).
+  } else {
+    // -------------------- SLOW SPELL: resolve immediately --------------------
+    effects.forEach(effect => {
+      if (effect.targetType === "TARGET_PLAYER") {
+        // Default: enemy player
+        const enemyPlayerIndex = 1 - sourcePlayerIndex;
+        const enemyTarget: SpellTarget = { type: "PLAYER", playerIndex: enemyPlayerIndex };
+        effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, enemyTarget);
+      } else if (effect.targetType === "SELF_PLAYER") {
+        effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, undefined);
+      } else {
+        // TARGET_CREATURE or NONE or ALL_* etc.
+        effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, target);
+      }
+    });
+
+    // Zone change + Catalyst
+    caster.hand = caster.hand.filter(c => c.id !== sourceCardId);
+    caster.graveyard.push(spellInHand);
+    markSpellCastAndTriggerCatalyst(gs, sourcePlayerIndex);
+    gs.log.push(`${spellCard.name} resolves.`);
+  }
+
+  // Clear pending target after resolution / stack placement
   gs.pendingTarget = undefined;
-  
+
   return gs;
 }
 
@@ -1017,21 +948,40 @@ export function resolveRelicTargeting(
   return result;
 }
 
+function getCatalystMultiplier(gs: GameState, playerIndex: number): number {
+  const player = gs.players[playerIndex];
+  const hasDoubler = player.board.some(
+    (bc) => bc && bc.card && bc.card.name === "Runeblade Ascendant"
+  );
+  return hasDoubler ? 2 : 1;
+}
+
+
 function markSpellCastAndTriggerCatalyst(gs: GameState, playerIndex: number) {
   const player = gs.players[playerIndex];
   player.spellsCastThisTurn += 1;
 
   if (player.spellsCastThisTurn === 1) {
+    const multiplier = getCatalystMultiplier(gs, playerIndex);
+
     player.board.forEach((bc, slotIdx) => {
       if (!bc) return;
       const effects = cardRegistry.getEffects(bc.card.name);
-      const catalystEffects = effects.filter(e => e.timing === "CATALYST");
-      catalystEffects.forEach(eff => {
-        effectExecutor.executeEffect(gs, eff, playerIndex, undefined);
-      });
+      const catalystEffects = effects.filter((e) => e.timing === "CATALYST");
+
+      for (let i = 0; i < multiplier; i++) {
+        catalystEffects.forEach((eff) => {
+          effectExecutor.executeEffect(gs, eff, playerIndex, {
+            type: "CREATURE",
+            playerIndex,
+            slotIndex,
+          });
+        });
+      }
     });
   }
 }
+
 
 function triggerLocationEffects(
   gs: GameState, 
@@ -1181,9 +1131,24 @@ function triggerDeathEffects(gs: GameState, playerIndex: number, slotIndex: numb
   const effects = cardRegistry.getEffects(bc.card.name);
   const deathEffects = effects.filter(e => e.timing === "DEATH");
   
+  if (deathEffects.length === 0) return;
+
   deathEffects.forEach(effect => {
-    effectExecutor.executeEffect(gs, effect, playerIndex, undefined);
+    const item: StackItem = {
+      id: `${Date.now()}-${Math.random()}`,
+      type: "TRIGGER",
+      sourceCardName: bc.card.name,
+      sourcePlayerIndex: playerIndex,
+      effects: [effect],
+      target: undefined,
+    };
+    gs.stack.push(item);
+    gs.log.push(`Death trigger from ${bc.card.name} is placed on the stack.`);
   });
+
+  // After putting death triggers on stack, give priority to the active player to respond
+  gs.priorityPassCount = 0;
+  givePriorityTo(gs, gs.activePlayerIndex);
 }
 
 function triggerOnAttackEffects(gs: GameState, playerIndex: number, slotIndex: number) {
@@ -1269,48 +1234,80 @@ function applyCreatureDamage(
     gs.log.push(`${bc.card.name} prevents ${used} damage.`);
   }
 
-  if (dmg <= 0) return;
-  bc.currentHp -= dmg;
-  gs.log.push(`${bc.card.name} takes ${dmg} damage.`);
+if (dmg <= 0) return;
+bc.currentHp -= dmg;
+gs.log.push(`${bc.card.name} takes ${dmg} damage.`);
+
+// Trigger ON_DAMAGED effects
+const effects = cardRegistry.getEffects(bc.card.name);
+const onDamagedEffects = effects.filter(e => e.timing === "ON_DAMAGED");
+onDamagedEffects.forEach(effect => {
+  effectExecutor.executeEffect(gs, effect, targetPlayerIndex, undefined);
+});
 
 if (bc.currentHp <= 0) {
-  // Trigger death effects
-  triggerDeathEffects(gs, targetPlayerIndex, slotIndex);
-  
-  // Track which creature killed it (if from combat)
-  if (!isSpellDamage) {
-    // Mark all creatures that dealt damage this turn as having killed
-    const attackingPlayer = gs.players[gs.activePlayerIndex];
-    attackingPlayer.board.forEach(atkCreature => {
-      if (atkCreature && (atkCreature as any).dealtDamageThisTurn) {
-        (atkCreature as any).killedCreatureThisTurn = true;
-      }
+    // Trigger death effects
+    triggerDeathEffects(gs, targetPlayerIndex, slotIndex);
+    
+    // Track which creature killed it (if from combat)
+    if (!sourceIsSpell) {
+      // Mark all creatures that dealt damage this turn as having killed
+      const attackingPlayer = gs.players[gs.activePlayerIndex];
+      attackingPlayer.board.forEach(atkCreature => {
+        if (atkCreature && (atkCreature as any).dealtDamageThisTurn) {
+          (atkCreature as any).killedCreatureThisTurn = true;
+        }
+      });
+    }
+    
+    // Remove relics and their bonuses
+    const attachedRelics = player.relics.filter(r => r.slotIndex === slotIndex);
+    attachedRelics.forEach(relicData => {
+      player.graveyard.push(relicData.relic);
+      gs.log.push(`${relicData.relic.name} goes to the graveyard.`);
     });
+    player.relics = player.relics.filter(r => r.slotIndex !== slotIndex);
+    
+    // Send creature to graveyard
+    player.graveyard.push(bc.card);
+    player.board[slotIndex] = null;
+    gs.log.push(`${bc.card.name} dies.`);
   }
-  
-  // Remove relics and their bonuses
-  const attachedRelics = player.relics.filter(r => r.slotIndex === slotIndex);
-  attachedRelics.forEach(relicData => {
-    player.graveyard.push(relicData.relic);
-    gs.log.push(`${relicData.relic.name} goes to the graveyard.`);
-  });
-  player.relics = player.relics.filter(r => r.slotIndex !== slotIndex);
-  
-  // Send creature to graveyard
-  player.graveyard.push(bc.card);
-  player.board[slotIndex] = null;
-  gs.log.push(`${bc.card.name} dies.`);
 }
+
+function dealPlayerDamage(
+  gs: GameState,
+  targetPlayerIndex: number,
+  amount: number,
+  sourcePlayerIndex: number | null,
+  fromSpell: boolean
+): void {
+  const targetPlayer = gs.players[targetPlayerIndex];
+
+  // Optionally apply location damage boosts from the source player
+  let dmg = amount;
+  if (sourcePlayerIndex !== null) {
+    const modifiers = getLocationModifiers(gs, sourcePlayerIndex);
+    dmg += modifiers.damageBoost;
+  }
+
+  if (dmg <= 0) return;
+
+  const before = targetPlayer.life;
+  // Clamp at 0 so life never goes negative
+  targetPlayer.life = Math.max(0, targetPlayer.life - dmg);
+  const actual = before - targetPlayer.life;
+
+  if (actual > 0) {
+    gs.log.push(`${targetPlayer.name} takes ${actual} damage.`);
+  }
 }
 
 function healPlayer(gs: GameState, playerIndex: number, amount: number, fromSpell: boolean): void {
   const player = gs.players[playerIndex];
-  let heal = amount;
   
-  // Tideswell Basin bonus (if you still have this location)
-  if (fromSpell && player.location?.name === "Tideswell Basin") {
-    heal += 1;
-  }
+  const modifiers = getLocationModifiers(gs, playerIndex);
+  let heal = amount + modifiers.healBoost;
   
   const old = player.life;
   player.life = Math.min(20, player.life + heal);
@@ -1326,6 +1323,236 @@ function healPlayer(gs: GameState, playerIndex: number, amount: number, fromSpel
 // Combat
 // ---------------------------------------------------------------------------
 
+export function declareGuardBlock(state: GameState, blockerSlotIndex: number): GameState {
+  const gs = cloneState(state);
+  const combat = gs.pendingCombat;
+
+  if (!combat) {
+    gs.log.push("There is no attack to block.");
+    return gs;
+  }
+
+  const defPlayerIndex = combat.targetPlayerIndex;
+  const blockerController = gs.priorityPlayerIndex;
+
+  // Only the defending player can declare blocks
+  if (blockerController !== defPlayerIndex) {
+    gs.log.push("Only the defending player can declare a block.");
+    return gs;
+  }
+
+  const defenderPlayer = gs.players[defPlayerIndex];
+
+  if (
+    blockerSlotIndex < 0 ||
+    blockerSlotIndex >= defenderPlayer.board.length
+  ) {
+    gs.log.push("Invalid blocker slot.");
+    return gs;
+  }
+
+  const blocker = defenderPlayer.board[blockerSlotIndex];
+  if (!blocker) {
+    gs.log.push("No creature in that slot to block with.");
+    return gs;
+  }
+
+  // Must have Guard keyword
+  if (!hasGuard(blocker.card.name)) {
+    gs.log.push(`${blocker.card.name} cannot block; it does not have Guard.`);
+    return gs;
+  }
+
+  // Can't block if Stunned
+  ensureRuntimeFields(blocker);
+  if ((blocker as any).stunnedForTurns > 0) {
+    gs.log.push(`${blocker.card.name} is Stunned and cannot block.`);
+    return gs;
+  }
+
+  // Record the block (the Guard becomes the new combat target)
+  combat.blockerSlotIndex = blockerSlotIndex;
+  gs.priorityPassCount = 0; // new action, reset the pass streak
+  gs.log.push(`${blocker.card.name} blocks the attack.`);
+
+  return gs;
+}
+
+function resolvePendingCombat(gs: GameState): void {
+  const combat = gs.pendingCombat;
+  if (!combat) return;
+
+  const {
+    attackerPlayerIndex: atkPlayerIndex,
+    attackerSlotIndex,
+    targetPlayerIndex: defPlayerIndex,
+    targetSlotIndex,
+    blockerSlotIndex,
+  } = combat;
+
+  const attackerPlayer = gs.players[atkPlayerIndex];
+  const defenderPlayer = gs.players[defPlayerIndex];
+
+  const attacker = attackerPlayer.board[attackerSlotIndex];
+  if (!attacker) {
+    gs.log.push("Attack fizzles: attacker is no longer on the battlefield.");
+    gs.pendingCombat = null;
+    return;
+  }
+  ensureRuntimeFields(attacker);
+
+  const bcAny = attacker as any;
+  const doubleStrike = hasDoubleStrike(attacker.card.name);
+  if (!bcAny.attacksThisTurn) bcAny.attacksThisTurn = 0;
+
+  const attackerAtk = getEffectiveAtk(gs, atkPlayerIndex, attackerSlotIndex);
+
+  // --------------------------------------------
+  // Determine who actually gets hit (blocker or original target)
+  // --------------------------------------------
+  let effectiveDefenderSlot: number | null = null;
+
+  // 1) If a blocker was declared and is still on the field, it becomes the target.
+  if (typeof blockerSlotIndex === "number") {
+    const blk = defenderPlayer.board[blockerSlotIndex];
+    if (blk) {
+      effectiveDefenderSlot = blockerSlotIndex;
+    }
+  }
+
+  // 2) If no valid blocker, fall back to the original target
+  if (effectiveDefenderSlot === null) {
+    if (targetSlotIndex === "PLAYER") {
+      // Direct attack (no block): handle player damage path below.
+    } else {
+      effectiveDefenderSlot = targetSlotIndex as number;
+    }
+  }
+
+  // -------------------- Attacking the player with NO block --------------------
+  if (targetSlotIndex === "PLAYER" && effectiveDefenderSlot === null) {
+    dealPlayerDamage(gs, defPlayerIndex, attackerAtk, atkPlayerIndex, false);
+    gs.log.push(
+      `${attacker.card.name} deals ${attackerAtk} damage to ${defenderPlayer.name}.`
+    );
+
+    if (attackerAtk > 0) {
+      bcAny.dealtDamageThisTurn = true;
+    }
+
+    if (attackerPlayer.location) {
+      triggerLocationEffects(gs, atkPlayerIndex, "ON_DAMAGE", {
+        damageDealt: attackerAtk,
+        source: attacker,
+        slotIndex: attackerSlotIndex,
+      });
+    }
+
+    if (hasLifetap(attacker.card.name)) {
+      healPlayer(gs, atkPlayerIndex, 1, false);
+    }
+
+    bcAny.attacksThisTurn += 1;
+    gs.pendingCombat = null;
+    return;
+  }
+
+  // -------------------- Creature vs creature combat (original target or Guard) --------------------
+  const defSlot = effectiveDefenderSlot!;
+  const defender = defenderPlayer.board[defSlot];
+  if (!defender) {
+    gs.log.push(`No defender in that slot (attack fizzles).`);
+    gs.pendingCombat = null;
+    return;
+  }
+  ensureRuntimeFields(defender);
+
+  const defenderAtk = getEffectiveAtk(gs, defPlayerIndex, defSlot);
+  const attackerName = attacker.card.name;
+  const defenderName = defender.card.name;
+
+  const attackerFirst = hasFirstStrike(attackerName);
+  const attackerHasPiercing = hasPiercing(attackerName);
+
+  const attackerHitsFirst = attackerFirst;
+
+  function dealCombatDamageToDefender(amount: number) {
+    const defenderHpBefore = defender.currentHp;
+
+    applyCreatureDamage(gs, defPlayerIndex, defSlot, amount, false);
+
+    if (amount > 0) {
+      bcAny.dealtDamageThisTurn = true;
+    }
+
+    // Thorns, Piercing, ATK_BUFF_ON_KILL unchanged...
+    const defenderStillAlive = defenderPlayer.board[defSlot] !== null;
+    if (defenderStillAlive && amount > 0) {
+      const thornsValue = getKeywordValue(defender.card, "THORNS");
+      if (thornsValue > 0) {
+        applyCreatureDamage(gs, atkPlayerIndex, attackerSlotIndex, thornsValue, false);
+        gs.log.push(`${defenderName} Thorns: ${thornsValue} damage to ${attackerName}.`);
+      }
+    }
+
+    if (attackerHasPiercing) {
+      const defenderAfter = defenderPlayer.board[defSlot];
+      if (!defenderAfter) {
+        const excessDamage = amount - defenderHpBefore;
+        if (excessDamage > 0) {
+          dealPlayerDamage(gs, defPlayerIndex, excessDamage, atkPlayerIndex, false);
+          gs.log.push(
+            `Piercing: ${excessDamage} excess damage dealt to ${defenderPlayer.name}.`
+          );
+        }
+      }
+    }
+
+    const defenderAfter = defenderPlayer.board[defSlot];
+    if (!defenderAfter && defenderHpBefore > 0) {
+      bcAny.killedCreatureThisTurn = true;
+      const effects = cardRegistry.getEffects(attacker.card.name);
+      const atkBuffEffect = effects.find(
+        e => e.customScript === "ATK_BUFF_ON_KILL"
+      );
+      if (atkBuffEffect && atkBuffEffect.atkBuff) {
+        bcAny.tempAtkBuff = (bcAny.tempAtkBuff || 0) + atkBuffEffect.atkBuff;
+        gs.log.push(`${attackerName} gains +${atkBuffEffect.atkBuff} ATK!`);
+      }
+    }
+  }
+
+  function dealCombatDamageToAttacker(amount: number) {
+    applyCreatureDamage(gs, atkPlayerIndex, attackerSlotIndex, amount, false);
+
+    const attackerStillAlive = attackerPlayer.board[attackerSlotIndex] !== null;
+    if (attackerStillAlive && amount > 0) {
+      const thornsValue = getKeywordValue(attacker.card, "THORNS");
+      if (thornsValue > 0) {
+        applyCreatureDamage(gs, defPlayerIndex, defSlot, thornsValue, false);
+        gs.log.push(`${attackerName} Thorns: ${thornsValue} damage to ${defenderName}.`);
+      }
+    }
+  }
+
+  if (attackerHitsFirst) {
+    dealCombatDamageToDefender(attackerAtk);
+    if (!defenderPlayer.board[defSlot]) {
+      gs.log.push(
+        `${attackerName} (First Strike) kills ${defenderName} before it can strike back.`
+      );
+    } else {
+      dealCombatDamageToAttacker(defenderAtk);
+    }
+  } else {
+    dealCombatDamageToDefender(attackerAtk);
+    dealCombatDamageToAttacker(defenderAtk);
+  }
+
+  bcAny.attacksThisTurn += 1;
+  gs.pendingCombat = null;
+}
+
 export function attack(
   state: GameState,
   attackerSlotIndex: number,
@@ -1334,6 +1561,12 @@ export function attack(
   const gs = cloneState(state);
   const atkPlayerIndex = gs.activePlayerIndex;
   const defPlayerIndex = target.playerIndex;
+
+  if (gs.phase !== "BATTLE_DECLARE") {
+    gs.log.push("You can only declare attacks during the Battle phase.");
+    return gs;
+  }
+
   const attackerPlayer = gs.players[atkPlayerIndex];
   const defenderPlayer = gs.players[defPlayerIndex];
 
@@ -1346,14 +1579,15 @@ export function attack(
     return gs;
   }
 
-  if ((attacker as any).frozenForTurns > 0) {
-    gs.log.push(`${attacker.card.name} is Frozen and cannot attack.`);
+  if ((attacker as any).stunnedForTurns > 0) {
+    gs.log.push(`${attacker.card.name} is Stunned and cannot attack.`);
     return gs;
   }
 
-  const doubleStrike = hasDoubleStrike(attacker.card.name);
   const bcAny = attacker as any;
+  const doubleStrike = hasDoubleStrike(attacker.card.name);
   if (!bcAny.attacksThisTurn) bcAny.attacksThisTurn = 0;
+
   if (!doubleStrike && bcAny.attacksThisTurn >= 1) {
     gs.log.push(`${attacker.card.name} has already attacked this turn.`);
     return gs;
@@ -1363,286 +1597,174 @@ export function attack(
     return gs;
   }
 
-  // Guard enforcement
-  const guardSlots = defenderPlayer.board
-    .map((bc, idx) => (bc && hasGuard(bc.card.name) ? idx : -1))
-    .filter(x => x !== -1) as number[];
-
-  if (guardSlots.length > 0) {
-    if (target.slotIndex === "PLAYER") {
-      gs.log.push(`You must attack a Guard creature instead of the player.`);
-      return gs;
-    }
-    if (!guardSlots.includes(target.slotIndex as number)) {
-      gs.log.push(`You must target a Guard creature.`);
-      return gs;
-    }
-  }
-
   // Trigger ON_ATTACK effects BEFORE combat damage
   triggerOnAttackEffects(gs, atkPlayerIndex, attackerSlotIndex);
 
-  const attackerAtk = getEffectiveAtk(gs, atkPlayerIndex, attackerSlotIndex);
+  // Record the pending combat
+  gs.pendingCombat = {
+    attackerPlayerIndex: atkPlayerIndex,
+    attackerSlotIndex,
+    targetPlayerIndex: defPlayerIndex,
+    targetSlotIndex: target.slotIndex,
+  };
 
-  if (target.slotIndex === "PLAYER") {
-    defenderPlayer.life -= attackerAtk;
-    gs.log.push(`${attacker.card.name} deals ${attackerAtk} damage to ${defenderPlayer.name}.`);
+  // Open a Fast-spell response window: defender gets priority first
+  gs.priorityPassCount = 0;
+  givePriorityTo(gs, defPlayerIndex);
+  gs.log.push(
+    `${attacker.card.name} attacks ${
+      target.slotIndex === "PLAYER" ? defenderPlayer.name : "an enemy creature"
+    }. Waiting for Fast spell responses...`
+  );
 
-    // Mark that this creature dealt damage this turn
-    if (attackerAtk > 0) {
-      (attacker as any).dealtDamageThisTurn = true;
-    }
-
-    // Trigger location effects on damage to player
-    if (attackerPlayer.location) {
-      triggerLocationEffects(gs, atkPlayerIndex, "ON_DAMAGE", { 
-        damageDealt: attackerAtk,
-        source: attacker,
-        slotIndex: attackerSlotIndex 
-      });
-    }
-
-    // Lifetap
-    if (hasLifetap(attacker.card.name)) {
-      healPlayer(gs, atkPlayerIndex, 1, false);
-    }
-    
-    bcAny.attacksThisTurn += 1;
-    return gs;
-  }
-
-  // Creature vs creature combat
-  const defSlot = target.slotIndex as number;
-  const defender = defenderPlayer.board[defSlot];
-  if (!defender) {
-    gs.log.push(`No defender in that slot.`);
-    return gs;
-  }
-  ensureRuntimeFields(defender);
-
-  const defenderAtk = getEffectiveAtk(gs, defPlayerIndex, defSlot);
-  const attackerName = attacker.card.name;
-  const defenderName = defender.card.name;
-
-  const attackerFirst = hasFirstStrike(attackerName);
-  const defenderFirst = hasFirstStrike(defenderName);
-  const attackerHasPiercing = hasPiercing(attackerName);
-
-  const attackerHitsFirst = attackerFirst && !defenderFirst;
-  const defenderHitsFirst = defenderFirst && !attackerFirst;
-
-  function dealCombatDamageToDefender(amount: number) {
-    const defenderHpBefore = defender.currentHp;
-    
-    applyCreatureDamage(gs, defPlayerIndex, defSlot, amount, false);
-    
-    // Mark that attacker dealt damage this turn
-    if (amount > 0) {
-      (attacker as any).dealtDamageThisTurn = true;
-    }
-    
-    // Thorns: defender deals damage back to attacker if it took damage
-const defenderStillAlive = defenderPlayer.board[defSlot] !== null;
-    if (defenderStillAlive && amount > 0) {
-      const thornsValue = getKeywordValue(defender.card, "THORNS");
-      if (thornsValue > 0) {
-        applyCreatureDamage(gs, atkPlayerIndex, attackerSlotIndex, thornsValue, false);
-        gs.log.push(`${defenderName} Thorns: ${thornsValue} damage to ${attackerName}.`);
-      }
-    }
-    
-    // Check for Piercing - if defender died, deal excess to player
-    if (attackerHasPiercing) {
-      const defenderAfter = defenderPlayer.board[defSlot];
-      if (!defenderAfter) {
-        // Defender died - calculate excess damage
-        const excessDamage = amount - defenderHpBefore;
-        if (excessDamage > 0) {
-          defenderPlayer.life -= excessDamage;
-          gs.log.push(`Piercing: ${excessDamage} excess damage dealt to ${defenderPlayer.name}.`);
-        }
-      }
-    }
-    
-    // Check for extra attack on kill effect
-    const defenderAfter = defenderPlayer.board[defSlot];
-    if (!defenderAfter && defenderHpBefore > 0) {
-      // Defender was killed
-      (attacker as any).killedCreatureThisTurn = true;
-      
-      const effects = cardRegistry.getEffects(attacker.card.name);
-      const extraAttackEffect = effects.find(e => e.customScript === "EXTRA_ATTACK_ON_KILL");
-      if (extraAttackEffect) {
-        (attacker as any).attacksThisTurn = Math.max(0, (attacker as any).attacksThisTurn - 1);
-        gs.log.push(`${attackerName} may attack again!`);
-      }
-    }
-  }
-
-  function dealCombatDamageToAttacker(amount: number) {
-    applyCreatureDamage(gs, atkPlayerIndex, attackerSlotIndex, amount, false);
-    
-    // Thorns: attacker deals damage back to defender if it took damage
-    const attackerStillAlive = attackerPlayer.board[attackerSlotIndex] !== null;
-    if (attackerStillAlive && amount > 0) {
-      const thornsValue = getKeywordValue(attacker.card, "THORNS");
-      if (thornsValue > 0) {
-        applyCreatureDamage(gs, defPlayerIndex, defSlot, thornsValue, false);
-        gs.log.push(`${attackerName} Thorns: ${thornsValue} damage to ${defenderName}.`);
-      }
-    }
-  }
-
-  // Apply combat damage based on first strike
-  if (attackerHitsFirst) {
-    dealCombatDamageToDefender(attackerAtk);
-    if (!defenderPlayer.board[defSlot]) {
-      gs.log.push(`${attackerName} (First Strike) kills ${defenderName} before it can strike back.`);
-    } else {
-      dealCombatDamageToAttacker(defenderAtk);
-    }
-  } else if (defenderHitsFirst) {
-    dealCombatDamageToAttacker(defenderAtk);
-    if (!attackerPlayer.board[attackerSlotIndex]) {
-      gs.log.push(`${defenderName} (First Strike) kills ${attackerName} before it can strike back.`);
-    } else {
-      dealCombatDamageToDefender(attackerAtk);
-    }
-  } else {
-    // Simultaneous damage
-    dealCombatDamageToDefender(attackerAtk);
-    dealCombatDamageToAttacker(defenderAtk);
-  }
-
-  bcAny.attacksThisTurn += 1;
-
+  // DO NOT call resolvePendingCombat here. Combat will resolve only after:
+  // - stack is empty, AND
+  // - both players pass priority (handled in passPriority).
   return gs;
 }
 
 // ---------------------------------------------------------------------------
-// SPELLS
+// Priority / stack helpers
 // ---------------------------------------------------------------------------
 
-export type SpellTarget =
-  | { type: "CREATURE"; playerIndex: number; slotIndex: number }
-  | { type: "PLAYER"; playerIndex: number }
-  | { type: "NONE" };
-
-function handleFirstSpellThisTurn(gs: GameState, playerIndex: number) {
-  const player = gs.players[playerIndex];
-
-  // Count how many Catalyst creatures there are
-  let catalystCount = 0;
-  for (let idx = 0; idx < player.board.length; idx++) {
-    const bc = player.board[idx];
-    if (!bc) continue;
-
-    const effects = cardRegistry.getEffects(bc.card.name);
-    const hasCatalyst = effects.some(e => e.timing === "CATALYST");
-    if (hasCatalyst) catalystCount++;
-  }
-
-  // For each Catalyst, draw 1 card
-  for (let i = 0; i < catalystCount; i++) {
-    drawCard(player);
-    gs.log.push(`Catalyst: ${player.name} draws 1 card(s).`);
-  }
-
-  // Then set up ONE discard choice for ALL the Catalysts combined
-  if (catalystCount > 0 && player.hand.length > 0) {
-    // Store how many discards are needed
-    (gs as any).pendingCatalystDiscards = catalystCount;
-    
-    gs.pendingDiscard = {
-      playerIndex,
-      source: `Catalyst resolves`,
-    };
-    gs.log.push(`Catalyst resolves: you discard ${catalystCount === 1 ? '1 card' : catalystCount + ' cards'}.`);
-  }
+function givePriorityTo(gs: GameState, playerIndex: number): void {
+  // Just set who currently has priority; do NOT touch priorityPassCount here.
+  gs.priorityPlayerIndex = playerIndex;
 }
 
-export function castSpell(state: GameState, handCardId: string, target?: SpellTarget): GameState {
-  console.log("=== castSpell called ===");
-  console.log("handCardId:", handCardId);
-  console.log("target:", target);
-  
+function getOpponentIndex(playerIndex: number): number {
+  return playerIndex === 0 ? 1 : 0;
+}
+
+function resolveTopOfStack(gs: GameState): void {
+  const item = gs.stack.pop();
+  if (!item) return;
+
+  // New: resolving something breaks the current "pass streak"
+  gs.priorityPassCount = 0;
+
+  const { type, sourceCardId, sourceCardName, sourcePlayerIndex, effects, target } = item;
+  const player = gs.players[sourcePlayerIndex];
+
+  if (type === "FAST_SPELL") {
+    // Move spell from hand to graveyard if it’s still there
+    const cardInHand = player.hand.find(c => c.id === sourceCardId);
+    if (cardInHand) {
+      player.hand = player.hand.filter(c => c.id !== sourceCardId);
+      player.graveyard.push(cardInHand);
+    }
+
+    effects.forEach(effect => {
+      effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, target);
+    });
+
+    markSpellCastAndTriggerCatalyst(gs, sourcePlayerIndex);
+  } else if (type === "TRIGGER") {
+    effects.forEach(effect => {
+      effectExecutor.executeEffect(gs, effect, sourcePlayerIndex, target);
+    });
+  }
+
+  // After resolving, active player gets priority again
+  givePriorityTo(gs, gs.activePlayerIndex);
+}
+
+export function passPriority(state: GameState): GameState {
   const gs = cloneState(state);
-  const player = gs.players[gs.activePlayerIndex];
-  const card = player.hand.find(c => c.id === handCardId);
-  
-  console.log("Found card:", card?.name);
-  
-  if (!card || (card.kind !== "FAST_SPELL" && card.kind !== "SLOW_SPELL")) {
-    console.log("Not a valid spell card, returning");
+  const current = gs.priorityPlayerIndex;
+  const opponent = getOpponentIndex(current);
+
+  // One more pass in this response window
+  gs.priorityPassCount += 1;
+
+  // CASE 1: Stack has items, and both players have now passed → resolve top-of-stack
+  if (gs.stack.length > 0 && gs.priorityPassCount >= 2) {
+    resolveTopOfStack(gs);
+    // resolveTopOfStack already reset priorityPassCount and gave priority to activePlayer
     return gs;
   }
 
-  const effects = cardRegistry.getEffects(card.name);
-  console.log("Effects from registry:", effects);
-  console.log("Number of effects:", effects.length);
-  
-  const needsTarget = effects.some(e => e.targetType !== "NONE");
-  console.log("Needs target:", needsTarget);
-
-  if (needsTarget && !target) {
-    console.log("No target provided, setting up pendingTarget");
-    // Determine targeting rule based on effect
-    const effect = effects[0]; // For simplicity, use first effect's targeting
-    let rule: TargetingRule;
-    
-    if (effect.targetType === "TARGET_CREATURE") {
-      rule = { type: "ALL_CREATURES" }; // Adjust based on card
-    } else if (effect.targetType === "TARGET_PLAYER") {
-      rule = { type: "ANY_PLAYER" };
-    } else {
-      rule = { type: "ALL_CREATURES" };
+  // CASE 2: Stack is empty, both players passed → either resolve combat or just close window
+  if (gs.stack.length === 0 && gs.priorityPassCount >= 2) {
+    if (gs.pendingCombat) {
+      // Finish the combat that was waiting for a Fast-spell window
+      resolvePendingCombat(gs);
     }
-
-    gs.pendingTarget = {
-      source: card.name,
-      rule,
-      onResolve: (state: GameState, tgt: SpellTarget | number[]) => {
-        return castSpell(state, handCardId, tgt as SpellTarget);
-      }
-    };
-    gs.log.push(`${card.name} needs a target.`);
+    // Close the window: reset pass count and return priority to active player
+    gs.priorityPassCount = 0;
+    givePriorityTo(gs, gs.activePlayerIndex);
     return gs;
   }
 
-  console.log("Executing effects...");
-  // Execute each effect with appropriate target
-  effects.forEach((effect, index) => {
-    console.log(`\n--- Processing effect ${index} ---`);
-    console.log("Effect:", effect);
-    console.log("Effect targetType:", effect.targetType);
-    
-    if (effect.targetType === "TARGET_PLAYER") {
-      console.log("✓ Detected TARGET_PLAYER, targeting enemy");
-      const enemyPlayerIndex = 1 - gs.activePlayerIndex;
-      console.log("Enemy player index:", enemyPlayerIndex);
-      const enemyTarget = {
-        playerIndex: enemyPlayerIndex,
-        slotIndex: "PLAYER" as const
-      };
-      console.log("Calling executeEffect with enemy target:", enemyTarget);
-      effectExecutor.executeEffect(gs, effect, gs.activePlayerIndex, enemyTarget);
-    } else {
-      console.log("✗ Not TARGET_PLAYER, using provided target");
-      console.log("Provided target:", target);
-      effectExecutor.executeEffect(gs, effect, gs.activePlayerIndex, target);
-    }
-  });
-
-  console.log("Moving spell to graveyard");
-  // Move spell to graveyard
-  player.hand = player.hand.filter(c => c.id !== card.id);
-  player.graveyard.push(card);
-
-  markSpellCastAndTriggerCatalyst(gs, gs.activePlayerIndex);
-
-  console.log("=== castSpell complete ===\n");
+  // CASE 3: Only one pass so far → hand priority to the opponent
+  givePriorityTo(gs, opponent);
   return gs;
 }
+
+// ---------------------------------------------------------------------------
+// Spell timing rules: Fast vs Slow
+// ---------------------------------------------------------------------------
+
+function canCastSpellNow(
+  gs: GameState,
+  playerIndex: number,
+  card: SpellCard
+): { ok: boolean; reason?: string } {
+  const isActivePlayer = playerIndex === gs.activePlayerIndex;
+
+  if (card.kind === "SLOW_SPELL") {
+    // Slow: only active player, only Main Phase, no stack
+    if (!isActivePlayer) {
+      return { ok: false, reason: "You can only cast Slow spells on your own turn." };
+    }
+    if (gs.phase !== "MAIN") {
+      return { ok: false, reason: "Slow spells can only be cast during your Main Phase." };
+    }
+    return { ok: true };
+  }
+
+  if (card.kind === "FAST_SPELL") {
+    // Fast: can be cast whenever this player has priority
+    if (gs.priorityPlayerIndex !== playerIndex) {
+      return {
+        ok: false,
+        reason: "You can only cast Fast spells when you have priority.",
+      };
+    }
+    // Fast spells are allowed in any phase as long as you have priority.
+    // (If you want to restrict to Battle + Main later, we can refine here.)
+    return { ok: true };
+  }
+
+  return { ok: false, reason: "This card is not a spell." };
+}
+
+// ---------------------------------------------------------------------------
+// Fast spell → stack helper
+// ---------------------------------------------------------------------------
+
+function pushFastSpellToStack(
+  gs: GameState,
+  playerIndex: number,
+  card: SpellCard,
+  target: SpellTarget | undefined
+): void {
+  const effects = cardRegistry.getEffects(card.name);
+
+  const item: StackItem = {
+    id: `${Date.now()}-${Math.random()}`,
+    type: "FAST_SPELL",
+    sourceCardId: card.id,
+    sourceCardName: card.name,
+    sourcePlayerIndex: playerIndex,
+    effects,
+    target,
+  };
+
+  gs.stack.push(item);
+  gs.log.push(`${card.name} is placed on the stack.`);
+}
+
 
 // ---------------------------------------------------------------------------
 // RELICS
@@ -1650,37 +1772,103 @@ export function castSpell(state: GameState, handCardId: string, target?: SpellTa
 
 export function playRelic(state: GameState, relicCardId: string, targetSlotIndex: number): GameState {
   const gs = cloneState(state);
-  const player = gs.players[gs.activePlayerIndex];
-  
+  const playerIndex = gs.activePlayerIndex;
+  const player = gs.players[playerIndex];
+
+  // 🔒 Relic timing: Relics are Slow spells
+  if (gs.phase !== "MAIN") {
+    gs.log.push("You can only play Relics during your Main Phase.");
+    return gs;
+  }
+
+  // (Optional stricter version if you want true sorcery speed)
+  // if (gs.stack.length > 0) {
+  //   gs.log.push("You can't play Relics while the stack is not empty.");
+  //   return gs;
+  // }
+
   const relicCard = player.hand.find(c => c.id === relicCardId);
   if (!relicCard || relicCard.kind !== "RELIC") return gs;
-  
+
+  // Must target one of your own creatures
+  if (targetSlotIndex < 0 || targetSlotIndex > 2) {
+    gs.log.push("Invalid relic target slot.");
+    return gs;
+  }
+
   const target = player.board[targetSlotIndex];
   if (!target) {
     gs.log.push("No creature in that slot to attach the relic.");
     return gs;
   }
-  
+
+  // NEW: enforce max 2 relics per creature
+  const existingRelicCount = getRelicCountOnSlot(player, targetSlotIndex);
+  if (existingRelicCount >= 2) {
+    gs.log.push(`${target.card.name} already has 2 relics and cannot hold more.`);
+    return gs;
+  }
+
+  // Apply relic bonuses to the creature (stats + keywords)
   applyRelicToCreature(target, relicCard as RelicCard);
-  
+
+  // Track the attachment
   player.relics.push({
     relic: relicCard as RelicCard,
     slotIndex: targetSlotIndex,
   });
-  
+
+  // Move relic from hand to "in play"
   player.hand = player.hand.filter(c => c.id !== relicCardId);
-  
+
   gs.log.push(`${relicCard.name} attached to ${target.card.name}.`);
-  
-  // ADD THIS LINE:
-  markSpellCastAndTriggerCatalyst(gs, gs.activePlayerIndex);
-  
+
+  // Relics count as spells cast for Catalyst
+  markSpellCastAndTriggerCatalyst(gs, playerIndex);
+
   return gs;
 }
 
 // ---------------------------------------------------------------------------
 // LOCATIONS
 // ---------------------------------------------------------------------------
+
+export function getLocationModifiers(gs: GameState, playerIndex: number): {
+  healBoost: number;
+  damageBoost: number;
+  drawBoost: number;
+} {
+  const player = gs.players[playerIndex];
+  const modifiers = {
+    healBoost: 0,
+    damageBoost: 0,
+    drawBoost: 0,
+  };
+  
+  if (!player.location) return modifiers;
+  
+  const text = player.location.text.toLowerCase();
+  
+  // Parse "all healing effects heal X extra"
+  const healMatch = text.match(/all healing.*?(\d+)\s+extra/);
+  if (healMatch) {
+    modifiers.healBoost = parseInt(healMatch[1]);
+  }
+  
+  // Parse "all damage effects deal X extra"
+  const damageMatch = text.match(/all damage.*?(\d+)\s+extra/);
+  if (damageMatch) {
+    modifiers.damageBoost = parseInt(damageMatch[1]);
+  }
+  
+  // Parse "all draw effects draw X extra"
+  const drawMatch = text.match(/all draw.*?(\d+)\s+extra/);
+  if (drawMatch) {
+    modifiers.drawBoost = parseInt(drawMatch[1]);
+  }
+  
+  return modifiers;
+}
 
 export function playLocation(state: GameState, handCardId: string): GameState {
   const gs = cloneState(state);
@@ -1759,33 +1947,33 @@ function canPlayEvolution(
   const player = gs.players[gs.activePlayerIndex];
   const enemy = gs.players[1 - gs.activePlayerIndex];
   const bc = player.board[slotIndex];
-  
-  // If slot is empty, any evolution can be played there
-  if (!bc) return true;
-  
+
+  // NEW: You must have a creature in this slot to evolve
+  if (!bc) return false;
+
   const text = evo.text.toLowerCase();
-  
-  // Check "evolve from X" requirement
+
+  // Check "evolve from X" requirement (text-based)
   if (text.includes("evolve from")) {
     const creatureName = bc.card.name;
     if (!text.includes(creatureName.toLowerCase())) {
       return false;
     }
   }
-  
+
   // Check "has taken damage" requirement
   if (text.includes("has taken damage")) {
     const maxHp = (bc.card as any).hp || 0;
     const damageTaken = maxHp - bc.currentHp;
     if (damageTaken <= 0) return false;
   }
-  
+
   // Check "has full hp" requirement
   if (text.includes("has full hp")) {
     const maxHp = (bc.card as any).hp || 0;
     if (bc.currentHp !== maxHp) return false;
   }
-  
+
   // Check "cast X or more spells this turn"
   const spellsMatch = text.match(/cast[ed]?\s+(\d+)\s+or more spells/);
   if (spellsMatch) {
@@ -1793,17 +1981,17 @@ function canPlayEvolution(
     const spellsCast = player.spellsCastThisTurn || 0;
     if (spellsCast < required) return false;
   }
-  
+
   // Check "dealt damage this turn"
   if (text.includes("dealt damage this turn")) {
     if (!(bc as any).dealtDamageThisTurn) return false;
   }
-  
+
   // Check "killed a creature this turn"
   if (text.includes("killed a creature this turn")) {
     if (!(bc as any).killedCreatureThisTurn) return false;
   }
-  
+
   // Check "X or more creatures in graveyard"
   const graveyardMatch = text.match(/(\d+)\s+or more creatures in (?:your )?graveyard/);
   if (graveyardMatch) {
@@ -1813,24 +2001,30 @@ function canPlayEvolution(
     ).length;
     if (creaturesInGraveyard < required) return false;
   }
-  
+
   // Check "if your life is lower than your opponent's"
   if (text.includes("if your life is lower than your opponent's")) {
     if (player.life >= enemy.life) return false;
   }
-  
+
   // Check "if you healed this turn"
   if (text.includes("if you healed this turn")) {
     if (!(player as any).healedThisTurn) return false;
   }
-  
+
+  // Check "if you control 3 creatures"
+  if (text.includes("if you control 3 creatures")) {
+    const occupied = player.board.filter(c => c !== null).length;
+    if (occupied < 3) return false;
+  }
+
   // Check "if your life is X or less"
   const lifeThresholdMatch = text.match(/if your life is (\d+) or less/);
   if (lifeThresholdMatch) {
     const threshold = parseInt(lifeThresholdMatch[1]);
     if (player.life > threshold) return false;
   }
-  
+
   return true;
 }
 
@@ -1838,13 +2032,27 @@ export function playDropInEvolution(
   state: GameState,
   evoCardId: string,
   slotIndex: number,
-  overwriteExisting: boolean = false
+  _overwriteExisting: boolean = false // kept for API compatibility, but not used
 ): GameState {
   const gs = cloneState(state);
   const player = gs.players[gs.activePlayerIndex];
 
+  // Find the evolution card in the evolution deck
   const evo = player.evolutionDeck.find(e => e.id === evoCardId);
   if (!evo) return gs;
+
+  // You must have a creature in this slot to evolve
+  const existing = player.board[slotIndex];
+  if (!existing) {
+    gs.log.push(`Cannot play ${evo.name}: there is no creature in slot ${slotIndex + 1} to evolve.`);
+    return gs;
+  }
+
+  // Check if existing creature is Stunned
+if ((existing as any).stunnedForTurns > 0) {
+  gs.log.push(`${existing.card.name} is Stunned and cannot be evolved.`);
+  return gs;
+}
 
   // Check if evolution conditions are met
   if (!canPlayEvolution(gs, evo, slotIndex)) {
@@ -1852,45 +2060,46 @@ export function playDropInEvolution(
     return gs;
   }
 
-  if (!overwriteExisting && player.board[slotIndex]) {
-    gs.log.push(`Slot ${slotIndex + 1} is occupied; use overwriteExisting=true to overwrite.`);
-    return gs;
+  // TRANSFORM LOGIC
+  const oldName = existing.card.name;
+  const prevCurrentHp = existing.currentHp;
+  const prevMaxHp = (existing.card as any).hp || prevCurrentHp;
+  const hadSummoningSickness = existing.hasSummoningSickness;
+
+  // Replace the card with the evolution card
+  existing.card = evo;
+
+  // Ensure runtime fields exist (temp buffs, shields, etc.)
+  ensureRuntimeFields(existing);
+
+  // SPECIAL HP RULINGS:
+  // 1) Damage remains (we keep prevCurrentHp).
+  // 2) If current HP exceeds the Evolution's printed max HP, 
+  //    its current HP becomes the new max HP.
+  const evoPrintedMax = (evo as any).hp || prevCurrentHp;
+
+  if (prevCurrentHp > evoPrintedMax) {
+    // Current HP becomes the new max HP for this evolved form
+    (existing.card as any).hp = prevCurrentHp;
+    existing.currentHp = prevCurrentHp;
+  } else {
+    // Otherwise, keep damage as-is but don't exceed printed max HP
+    existing.currentHp = Math.min(prevCurrentHp, evoPrintedMax);
   }
 
-  const existing = player.board[slotIndex];
-  
-  // Check if existing creature is frozen
-  if (existing && overwriteExisting && (existing as any).frozenForTurns > 0) {
-    gs.log.push(`${existing.card.name} is Frozen and cannot be replaced.`);
-    return gs;
-  }
-  
-  if (existing) {
-    // Remove relic bonuses before removing creature
-    removeAllRelicsFromCreature(existing);
-    
-    // Send relics to graveyard
-    const relicsToMove = player.relics.filter(r => r.slotIndex === slotIndex);
-    relicsToMove.forEach(r => {
-      player.graveyard.push(r.relic);
-      gs.log.push(`${r.relic.name} goes to the graveyard.`);
-    });
-    player.relics = player.relics.filter(r => r.slotIndex !== slotIndex);
-    
-    player.graveyard.push(existing.card);
-  }
+  // IMPORTANT: Do NOT give it summoning sickness.
+  // We keep whatever it had before.
+  existing.hasSummoningSickness = hadSummoningSickness;
 
-  const bc: BoardCreature = {
-    card: evo,
-    currentHp: evo.hp,
-    hasSummoningSickness: true,
-  };
-  ensureRuntimeFields(bc);
+  // Relics stay attached to this slot; we do NOT remove or move them.
+  // player.relics already points at slotIndex, so nothing to change.
 
-  player.board[slotIndex] = bc;
+  // Remove the evolution card from the evolution deck
   player.evolutionDeck = player.evolutionDeck.filter(e => e.id !== evo.id);
 
-  gs.log.push(`${player.name} summons evolution ${evo.name}.`);
+  gs.log.push(
+    `${player.name} evolves ${oldName} into ${evo.name}.`
+  );
 
   return gs;
 }

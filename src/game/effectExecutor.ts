@@ -2,7 +2,7 @@
 
 import { GameState, PlayerState, BoardCreature } from "./types";
 import { CardEffect, TargetType } from "./cardEffects";
-import { SpellTarget } from "./engine";
+import { SpellTarget, getLocationModifiers  } from "./engine";
 
 export class EffectExecutor {
   executeEffect(
@@ -31,6 +31,9 @@ export class EffectExecutor {
       case "ON_DAMAGE":
         this.executeImmediateEffect(gs, effect, sourcePlayerIndex, target);
         break;
+        case "ON_DAMAGED":
+  this.executeImmediateEffect(gs, effect, sourcePlayerIndex, target);
+  break;
       case "START_OF_TURN":
         this.executeImmediateEffect(gs, effect, sourcePlayerIndex, target);
         break;
@@ -46,6 +49,7 @@ export class EffectExecutor {
     }
   }
   
+// Add this at the start of executeImmediateEffect, before handling damage
 private executeImmediateEffect(
   gs: GameState,
   effect: CardEffect,
@@ -55,49 +59,56 @@ private executeImmediateEffect(
   const player = gs.players[playerIndex];
   const enemy = gs.players[1 - playerIndex];
   
-  console.log("executeImmediateEffect - target:", target);
-  console.log("target.slotIndex:", target?.slotIndex);
-  console.log("target.type:", target?.type);
-  console.log("effect.damage:", effect.damage);
-  
-  // Handle HEAL_IF_KILL specially - check before and after damage
-  let creatureWasAlive = false;
-  if (effect.customScript === "HEAL_IF_KILL" && target?.type === "CREATURE" && effect.damage) {
-    const targetPlayer = gs.players[target.playerIndex];
-    creatureWasAlive = targetPlayer.board[target.slotIndex] !== null;
+  // EVALUATE CONDITIONAL VALUES FIRST
+  if (effect.conditionalDamage) {
+    effect.damage = this.evaluateConditionalValue(gs, playerIndex, effect.conditionalDamage);
   }
-  
-  // Handle custom scripts first (but don't return - continue processing)
-  if (effect.customScript && effect.customScript !== "HEAL_IF_KILL") {
-    this.handleCustomScript(gs, effect.customScript, playerIndex, target);
+  if (effect.conditionalHeal) {
+    effect.heal = this.evaluateConditionalValue(gs, playerIndex, effect.conditionalHeal);
   }
-  
-  // Handle damage
-  if (effect.damage !== undefined) {
-    console.log("Processing damage effect");
-    console.log("target?.type === 'CREATURE':", target?.type === "CREATURE");
-    console.log("target?.type === 'PLAYER':", target?.type === "PLAYER");
-    console.log("target?.slotIndex === 'PLAYER':", target?.slotIndex === "PLAYER");
+  if (effect.conditionalDraw) {
+    effect.draw = this.evaluateConditionalValue(gs, playerIndex, effect.conditionalDraw);
+  }
     
-    if (target?.type === "CREATURE") {
-      this.applyDamageToCreature(
-        gs,
-        target.playerIndex,
-        target.slotIndex,
-        effect.damage,
-        true
-      );
+  // Handle HEAL_IF_KILL specially - check before and after damage
+// Handle HEAL_IF_KILL specially - check before and after damage
+let creatureWasAlive = false;
+if (effect.customScript === "HEAL_IF_KILL" && target?.type === "CREATURE" && effect.damage) {
+  const targetPlayer = gs.players[target.playerIndex];
+  creatureWasAlive = targetPlayer.board[target.slotIndex] !== null;
+}
+
+// Handle custom scripts first (but don't process HEAL_IF_KILL yet - it needs to check after damage)
+if (effect.customScript && effect.customScript !== "HEAL_IF_KILL") {
+  this.handleCustomScript(gs, effect.customScript, playerIndex, target);
+}
+
+// Handle damage
+if (effect.damage !== undefined) {
+  console.log("Processing damage effect");
+  console.log("target?.type === 'CREATURE':", target?.type === "CREATURE");
+  console.log("target?.type === 'PLAYER':", target?.type === "PLAYER");
+  console.log("target?.slotIndex === 'PLAYER':", target?.slotIndex === "PLAYER");
+  
+  if (target?.type === "CREATURE") {
+    this.applyDamageToCreature(
+      gs,
+      target.playerIndex,
+      target.slotIndex,
+      effect.damage,
+      true
+    );
+    
+    // NOW check if HEAL_IF_KILL condition is met (creature died)
+    if (effect.customScript === "HEAL_IF_KILL" && creatureWasAlive) {
+      const targetPlayer = gs.players[target.playerIndex];
+      const creatureIsDead = targetPlayer.board[target.slotIndex] === null;
       
-      // Check if HEAL_IF_KILL condition is met (creature died)
-      if (effect.customScript === "HEAL_IF_KILL" && creatureWasAlive) {
-        const targetPlayer = gs.players[target.playerIndex];
-        const creatureIsDead = targetPlayer.board[target.slotIndex] === null;
-        
-        if (creatureIsDead) {
-          this.healPlayer(gs, playerIndex, 1, true);
-        }
+      if (creatureIsDead) {
+        this.healPlayer(gs, playerIndex, 1, true);
       }
-    } else if (target?.type === "PLAYER") {
+    }
+  } else if (target?.type === "PLAYER") {
         const targetPlayer = gs.players[target.playerIndex];
         targetPlayer.life -= effect.damage;
         gs.log.push(`${targetPlayer.name} takes ${effect.damage} damage.`);
@@ -181,14 +192,14 @@ if (effect.heal !== undefined) {
       }
     }
     
-    // Handle freeze
-    if (effect.freeze !== undefined && target?.type === "CREATURE") {
-      const bc = gs.players[target.playerIndex].board[target.slotIndex];
-      if (bc) {
-        (bc as any).frozenForTurns = effect.freeze;
-        gs.log.push(`${bc.card.name} is Frozen for ${effect.freeze} turn(s).`);
-      }
-    }
+// Handle stun
+if (effect.stun !== undefined && target?.type === "CREATURE") {
+  const bc = gs.players[target.playerIndex].board[target.slotIndex];
+  if (bc) {
+    (bc as any).stunnedForTurns = effect.stun;
+    gs.log.push(`${bc.card.name} is Stunned for ${effect.stun} turn(s).`);
+  }
+}
     
     // Handle shield
     if (effect.shield !== undefined && target?.type === "CREATURE") {
@@ -305,26 +316,27 @@ private executeOnAttackEffect(
   }
 }
   
-  private executeDeathEffect(
-    gs: GameState,
-    effect: CardEffect,
-    playerIndex: number
-  ): void {
-    const player = gs.players[playerIndex];
-    const enemy = gs.players[1 - playerIndex];
-    
-    if (effect.heal !== undefined) {
-      player.life = Math.min(player.life + effect.heal, 20);
-      gs.log.push(`${player.name} heals ${effect.heal} HP (Death ability).`);
-    }
-    
-    if (effect.damage !== undefined) {
-      if (effect.targetType === "TARGET_PLAYER") {
-        enemy.life -= effect.damage;
-        gs.log.push(`${enemy.name} takes ${effect.damage} damage (Death ability).`);
-      }
+private executeDeathEffect(
+  gs: GameState,
+  effect: CardEffect,
+  playerIndex: number
+): void {
+  const player = gs.players[playerIndex];
+  const enemy = gs.players[1 - playerIndex];
+  
+  if (effect.heal !== undefined) {
+    // Use the centralized healPlayer method which includes location boosts
+    this.healPlayer(gs, playerIndex, effect.heal, false);
+    gs.log.push(`(Death ability)`);
+  }
+  
+  if (effect.damage !== undefined) {
+    if (effect.targetType === "TARGET_PLAYER") {
+      enemy.life -= effect.damage;
+      gs.log.push(`${enemy.name} takes ${effect.damage} damage (Death ability).`);
     }
   }
+}
   
   private executeCatalystEffect(
     gs: GameState,
@@ -357,6 +369,61 @@ private executeOnAttackEffect(
       });
     }
   }
+
+  private triggerCatalystAgain(gs: GameState, playerIndex: number): void {
+  const player = gs.players[playerIndex];
+  
+  player.board.forEach((bc, slotIdx) => {
+    if (!bc) return;
+    const effects = cardRegistry.getEffects(bc.card.name);
+    const catalystEffects = effects.filter((e) => e.timing === "CATALYST");
+    
+    catalystEffects.forEach((eff) => {
+      effectExecutor.executeEffect(gs, eff, playerIndex, {
+        type: "CREATURE",
+        playerIndex,
+        slotIndex: slotIdx,
+      });
+    });
+  });
+  
+  gs.log.push(`Catalyst effects trigger again!`);
+}
+
+private evaluateConditionalValue(
+  gs: GameState,
+  playerIndex: number,
+  conditional: ConditionalValue
+): number {
+  const { baseValue, bonusValue, condition } = conditional;
+  const player = gs.players[playerIndex];
+  
+  let conditionMet = false;
+  
+  switch (condition.type) {
+    case "CREATURE_TYPE_COUNT":
+      if (condition.creatureType && condition.minCount) {
+        const count = player.board.filter(bc => 
+          bc && (bc.card as any).type?.toLowerCase() === condition.creatureType.toLowerCase()
+        ).length;
+        conditionMet = count >= condition.minCount;
+      }
+      break;
+      
+    case "RELIC_COUNT":
+      if (condition.relicTag && condition.minCount) {
+        const count = player.relics.filter(r =>
+          r.relic.name.toLowerCase().includes(condition.relicTag!.toLowerCase())
+        ).length;
+        conditionMet = count >= condition.minCount;
+      }
+      break;
+      
+    // Add other condition types as needed
+  }
+  
+  return conditionMet ? bonusValue : baseValue;
+}
   
   private handleCustomScript(
     gs: GameState,
@@ -377,6 +444,14 @@ private executeOnAttackEffect(
       case "RESURRECT_TO_HAND":
         this.resurrectToHand(gs, playerIndex);
         break;
+
+        case "RESURRECT_NAMED_TO_HAND":
+  this.resurrectNamedToHand(gs, playerIndex, effect);
+  break;
+
+  case "COPY_RELIC_KEYWORDS":
+  this.copyRelicKeywords(gs, playerIndex);
+  break;
         
       case "HEAL_IF_KILL":
         // This needs special handling - check if target died
@@ -392,10 +467,13 @@ private executeOnAttackEffect(
         }
         break;
         
-      case "ONCE_PER_TURN_PER_CREATURE":
-        // This is handled in triggerLocationEffects, not here
-        // Just ignore it
-        break;
+case "TRIGGER_CATALYST":
+  this.triggerCatalystAgain(gs, playerIndex);
+  break;
+
+  case "SEARCH_DECK_TO_TOP":
+  this.searchDeckToTop(gs, playerIndex, effect);
+  break;
         
       default:
         // Unknown custom script - just log it
@@ -456,6 +534,38 @@ private executeOnAttackEffect(
     player.hand.push(card as any);
     gs.log.push(`${card.name} returns to your hand.`);
   }
+
+private resurrectNamedToHand(
+  gs: GameState,
+  playerIndex: number,
+  effect: CardEffect
+): void {
+  const player = gs.players[playerIndex];
+  
+  // Parse what to search for from the customScript
+  // e.g., "RESURRECT_NAMED_TO_HAND_RUNEBLADE"
+  const parts = effect.customScript?.split("_") || [];
+  const searchTag = parts[parts.length - 1]; // "RUNEBLADE", "GAUNTLET", etc.
+  
+  // Find creature matching the name criteria
+  const targetCard = [...player.graveyard]
+    .reverse()
+    .find(c => 
+      (c.kind === "CREATURE" || c.kind === "EVOLUTION") &&
+      c.name.toLowerCase().includes(searchTag.toLowerCase())
+    );
+  
+  if (!targetCard) {
+    gs.log.push("No matching creature in graveyard.");
+    return;
+  }
+  
+  // Remove from graveyard and add to hand
+  player.graveyard = player.graveyard.filter(c => c.id !== targetCard.id);
+  player.hand.push(targetCard as MainDeckCard);
+  
+  gs.log.push(`${targetCard.name} returns to your hand.`);
+}
   
   // Helper methods
   private drawCard(player: PlayerState): void {
@@ -464,6 +574,126 @@ private executeOnAttackEffect(
       player.hand.push(card);
     }
   }
+
+private searchDeckToTop(
+  gs: GameState,
+  playerIndex: number,
+  effect: CardEffect
+): void {
+  const player = gs.players[playerIndex];
+  
+  // Parse what to search for from the customScript
+  // e.g., "SEARCH_DECK_TO_TOP_RUNEBLADE_RELIC"
+  const parts = effect.customScript?.split("_") || [];
+  const searchTag = parts[parts.length - 2]; // "RUNEBLADE"
+  const searchType = parts[parts.length - 1]; // "RELIC"
+  
+  // Find cards matching the search criteria
+  const matchingCards = player.deck.filter(c => {
+    if (searchType === "RELIC" && c.kind !== "RELIC") return false;
+    if (searchType === "CREATURE" && c.kind !== "CREATURE") return false;
+    if (searchType === "SPELL" && c.kind !== "FAST_SPELL" && c.kind !== "SLOW_SPELL") return false;
+    
+    // Check if card name contains the tag
+    return c.name.toLowerCase().includes(searchTag.toLowerCase());
+  });
+  
+  if (matchingCards.length === 0) {
+    gs.log.push("No matching cards found in deck.");
+    return;
+  }
+  
+  // Take the first matching card
+  const card = matchingCards[0];
+  const cardIndex = player.deck.indexOf(card);
+  
+  // Remove from deck
+  player.deck.splice(cardIndex, 1);
+  
+  // Place on top of deck
+  player.deck.unshift(card);
+  
+  gs.log.push(`A card is moved to the top of the deck.`);
+}
+
+// Better approach - parse from the card's actual text
+private copyRelicKeywords(
+  gs: GameState,
+  playerIndex: number,
+  effect: CardEffect
+): void {
+  const player = gs.players[playerIndex];
+  
+  // Find the creature that has this Catalyst effect
+  let sourceCreature: BoardCreature | null = null;
+  let sourceSlot = -1;
+  
+  for (let i = 0; i < player.board.length; i++) {
+    const bc = player.board[i];
+    if (!bc) continue;
+    
+    const effects = cardRegistry.getEffects(bc.card.name);
+    const hasCopyKeywordsEffect = effects.some(e => 
+      e.customScript?.startsWith("COPY_RELIC_KEYWORDS")
+    );
+    
+    if (hasCopyKeywordsEffect) {
+      sourceCreature = bc;
+      sourceSlot = i;
+      break;
+    }
+  }
+  
+  if (!sourceCreature) return;
+  
+  // Parse the creature's text to find the relic tag
+  // Pattern: "Gain all keywords from the [TAG] relics you control"
+  const text = sourceCreature.card.text;
+  const match = text.match(/gain all keywords from (?:the )?(\w+) relics/i);
+  
+  if (!match) {
+    console.error("Could not parse relic tag from card text:", text);
+    return;
+  }
+  
+  const relicTag = match[1]; // "Runeblade", "Gauntlet", etc.
+  const creatureCard = sourceCreature.card as any;
+  
+  // Ensure keywords array exists
+  if (!creatureCard.keywords) creatureCard.keywords = [];
+  if (!creatureCard.catalystAddedKeywords) creatureCard.catalystAddedKeywords = [];
+  
+  // Collect all unique keywords from matching relics
+  const relicKeywords = new Map<string, any>();
+  
+  player.relics.forEach(relicData => {
+    // Check if this relic matches the tag
+    if (!relicData.relic.name.toLowerCase().includes(relicTag.toLowerCase())) return;
+    
+    const keywords = cardRegistry.getKeywords(relicData.relic.name);
+    keywords.forEach(kw => {
+      // Store the highest value for value-based keywords
+      const existing = relicKeywords.get(kw.keyword);
+      if (!existing || 
+          (kw.armor || 0) > (existing.armor || 0) || 
+          (kw.regen || 0) > (existing.regen || 0) ||
+          (kw.surge || 0) > (existing.surge || 0) ||
+          (kw.thorns || 0) > (existing.thorns || 0)) {
+        relicKeywords.set(kw.keyword, kw);
+      }
+    });
+  });
+  
+  // Add all collected keywords to the creature
+  relicKeywords.forEach(kw => {
+    creatureCard.keywords.push(kw);
+    creatureCard.catalystAddedKeywords.push(kw);
+  });
+  
+  if (relicKeywords.size > 0) {
+    gs.log.push(`${sourceCreature.card.name} gains keywords from ${relicTag} relics!`);
+  }
+}
   
   private applyDamageToCreature(
     gs: GameState,
@@ -488,48 +718,43 @@ private executeOnAttackEffect(
     }
   }
   
-  private healCreature(
-    gs: GameState,
-    playerIndex: number,
-    slotIndex: number,
-    amount: number,
-    fromSpell: boolean
-  ): void {
-    const player = gs.players[playerIndex];
-    const bc = player.board[slotIndex];
-    if (!bc) return;
-    
-    let heal = amount;
-    
-    // Tideswell Basin bonus
-    if (fromSpell && player.location?.name === "Tideswell Basin") {
-      heal += 1;
-    }
-    
-    const maxHp = (bc.card as any).hp;
-    const old = bc.currentHp;
-    bc.currentHp = Math.min(bc.currentHp + heal, maxHp);
+private healCreature(
+  gs: GameState,
+  playerIndex: number,
+  slotIndex: number,
+  amount: number
+): void {
+  const player = gs.players[playerIndex];
+  const bc = player.board[slotIndex];
+  if (!bc) return;
+  
+  const modifiers = getLocationModifiers(gs, playerIndex);
+  let heal = amount + modifiers.healBoost;
+  
+  const maxHp = (bc.card as any).hp;
+  const old = bc.currentHp;
+  bc.currentHp = Math.min(bc.currentHp + heal, maxHp);
+  
+  if (bc.currentHp > old) {
     gs.log.push(`${bc.card.name} heals ${bc.currentHp - old} HP.`);
   }
+}
   
-  private healPlayer(
-    gs: GameState,
-    playerIndex: number,
-    amount: number,
-    fromSpell: boolean
-  ): void {
-    const player = gs.players[playerIndex];
-    let heal = amount;
-    
-    // Tideswell Basin bonus
-    if (fromSpell && player.location?.name === "Tideswell Basin") {
-      heal += 1;
-    }
-    
-    const old = player.life;
-    player.life = Math.min(20, player.life + heal);
-    gs.log.push(`${player.name} heals ${player.life - old} HP.`);
-  }
+private healPlayer(
+  gs: GameState,
+  playerIndex: number,
+  amount: number,
+): void {
+  const player = gs.players[playerIndex];
+  
+  const modifiers = getLocationModifiers(gs, playerIndex);
+  console.log("Healing player", playerIndex, "base amount:", amount, "boost:", modifiers.healBoost, "location:", player.location?.name);
+  let heal = amount + modifiers.healBoost;
+  
+  const old = player.life;
+  player.life = Math.min(20, player.life + heal);
+  gs.log.push(`${player.name} heals ${player.life - old} HP.`);
+}
 }
 
 export const effectExecutor = new EffectExecutor();

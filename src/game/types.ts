@@ -25,16 +25,17 @@ export interface BaseCard {
   name: string;
   kind: CardKind;
   text: string; // short rules text / reminder text
-    imagePath?: string; // ← ADD THIS
+  imagePath?: string; // optional card art path
 }
 
 // --- Creatures ---
 
 export interface CreatureCard extends BaseCard {
   kind: "CREATURE";
-  rank: Rank;
+  tier: number;
   atk: number;
   hp: number;
+    type?: string; // "Warrior", "Dragon", "Mage", etc.
 }
 
 // --- Spells ---
@@ -59,8 +60,8 @@ export interface LocationCard extends BaseCard {
 
 export interface EvolutionCard extends BaseCard {
   kind: "EVOLUTION";
-  baseName: string;     // name of the base creature this can evolve from
-  requiredRank: Rank;   // rank of the base creature
+  baseName: string;   // name of the base creature this can evolve from
+  requiredTier: number; // rank of the base creature
   atk: number;
   hp: number;
 }
@@ -82,9 +83,7 @@ export interface BoardCreature {
   card: CreatureCard | EvolutionCard;
   currentHp: number;
   hasSummoningSickness: boolean;
-  // You can later add flags like:
-  // hasAttackedThisTurn?: boolean;
-  // tempAttackBuff?: number;
+  // Engine adds runtime-only fields (tempAtkBuff, stunnedForTurns, etc.) at runtime.
 }
 
 export interface AttachedRelic {
@@ -115,11 +114,15 @@ export interface PlayerState {
   // single active location
   location: LocationCard | null;
 
-  // NEW: how many spells this player has cast during the current turn
+  // how many spells this player has cast during the current turn
   spellsCastThisTurn: number;
 }
 
-export type TargetingRule = 
+// -----------------------------
+// Targeting + pending target
+// -----------------------------
+
+export type TargetingRule =
   | { type: "ENEMY_CREATURES" }
   | { type: "FRIENDLY_CREATURES" }
   | { type: "ALL_CREATURES" }
@@ -127,29 +130,67 @@ export type TargetingRule =
   | { type: "ANY_PLAYER" }
   | { type: "SACRIFICE"; requiredHp: number };
 
+// Spell / effect targeting as used by the engine + effectExecutor
+export type SpellTarget =
+  | { type: "CREATURE"; playerIndex: number; slotIndex: number }
+  | { type: "PLAYER"; playerIndex: number }
+  | { type: "NONE" };
+
 export interface PendingTarget {
   source: string;
   rule: TargetingRule;
   sourcePlayerIndex: number;
   sourceSlotIndex?: number;
   sourceCardId?: string;
-  sourceType: "ON_PLAY" | "SPELL" | "RELIC";  // Add RELIC here
+  sourceType: "ON_PLAY" | "SPELL" | "RELIC";
 }
+
+// -----------------------------
+// Stack + priority types
+// -----------------------------
+
+export type StackItemType = "FAST_SPELL" | "TRIGGER";
+
+export interface StackItem {
+  id: string;
+  type: StackItemType;
+  sourceCardId?: CardId;  // for spells
+  sourceCardName: string;
+  sourcePlayerIndex: number;
+  // In practice these are CardEffect objects, but we keep it loose here
+  // to avoid circular imports from cardEffects.ts.
+  effects: any[];
+  target?: SpellTarget;
+}
+
 // -----------------------------
 // Game state & phases
 // -----------------------------
 
-export type Phase = "DRAW" | "MAIN" | "ATTACK" | "END";
+export type Phase =
+  | "DRAW"
+  | "MAIN"
+  | "BATTLE_DECLARE"  // was "ATTACK"
+  | "BATTLE_DAMAGE"   // used when a single attack is resolving
+  | "END";
 
 export interface PendingDiscard {
   playerIndex: number;
   source: string; // e.g. "Driftseer Acolyte"
 }
 
-interface PendingSacrificeSummon {
+export interface PendingSacrificeSummon {
   cardId: string;
   targetSlot: number;
   requiredHp: number;
+}
+
+export interface PendingCombat {
+  attackerPlayerIndex: number;
+  attackerSlotIndex: number;
+  targetPlayerIndex: number;
+  targetSlotIndex: number | "PLAYER";
+    blockerSlotIndex?: number; // NEW: defending Guard creature that blocks, if any
 }
 
 export interface GameState {
@@ -159,8 +200,15 @@ export interface GameState {
   turnNumber: number;
   log: string[];
 
-  // NEW: if not null, active player must discard a card from hand
   pendingDiscard?: PendingDiscard | null;
   pendingSacrificeSummon?: PendingSacrificeSummon | null;
   pendingTarget?: PendingTarget;
+
+  stack: StackItem[];
+  priorityPlayerIndex: number;
+  priorityPassCount: number;
+
+  // NEW: current attack being resolved (if any)
+  pendingCombat?: PendingCombat | null;
 }
+

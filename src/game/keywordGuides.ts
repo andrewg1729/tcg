@@ -163,14 +163,14 @@ export const KEYWORD_DEFINITIONS: KeywordDefinition[] = [
   // Status effects
   // ----------------------
   {
-    keyword: "Frozen",
-    label: "Frozen",
+    keyword: "Stunned",
+    label: "Stunned",
     timing: "status",
     short:
       "This creature cannot attack during its controller’s next turn.",
     detailed:
-      "A Frozen creature skips its next opportunity to attack. After its controller’s next turn passes, " +
-      "Frozen is removed. Frozen does not prevent it from blocking (if we later add blocks) or from being targeted.",
+      "A Stunned creature skips its next opportunity to attack. After its controller’s next turn passes, " +
+      "Stun is removed. Stun does not prevent it from blocking (if we later add blocks) or from being targeted.",
   },
   {
     keyword: "Summoning Sickness",

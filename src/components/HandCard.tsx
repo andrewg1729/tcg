@@ -9,7 +9,6 @@ interface HandCardProps {
   onSummon?: (slotIndex: number) => void;
   onCastSpell?: () => void;
   onPlayRelic?: () => void;
-  onPlayLocation?: () => void;
   index: number;
   total: number;
   isDiscardMode?: boolean;
@@ -24,7 +23,6 @@ export const HandCard: React.FC<HandCardProps> = ({
   onSummon,
   onCastSpell,
   onPlayRelic,
-  onPlayLocation,
   index,
   total,
   isDiscardMode,
@@ -38,7 +36,6 @@ export const HandCard: React.FC<HandCardProps> = ({
   const isCreature = card.kind === "CREATURE" || card.kind === "EVOLUTION";
   const isSpell = card.kind === "FAST_SPELL" || card.kind === "SLOW_SPELL";
   const isRelic = card.kind === "RELIC";
-  const isLocation = card.kind === "LOCATION";
 
   const handleClickDiscard = () => {
     if (isDiscardMode && onDiscard) {
@@ -59,15 +56,13 @@ export const HandCard: React.FC<HandCardProps> = ({
     >
       {/* Card Image */}
       {card.imagePath ? (
-        <img 
-          src={card.imagePath} 
-          alt={card.name} 
+        <img
+          src={card.imagePath}
+          alt={card.name}
           className="hand-card-image"
         />
       ) : (
-        <div className="hand-card-placeholder">
-          {card.name}
-        </div>
+        <div className="hand-card-placeholder">{card.name}</div>
       )}
 
       {/* Action buttons overlay */}
@@ -75,15 +70,39 @@ export const HandCard: React.FC<HandCardProps> = ({
         <div className="hand-card-actions">
           {isCreature && canPlayNormally && onSummon && (
             <>
-              <button onClick={(e) => { e.stopPropagation(); onSummon(0); }}>L</button>
-              <button onClick={(e) => { e.stopPropagation(); onSummon(1); }}>C</button>
-              <button onClick={(e) => { e.stopPropagation(); onSummon(2); }}>R</button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSummon(0);
+                }}
+              >
+                L
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSummon(1);
+                }}
+              >
+                C
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSummon(2);
+                }}
+              >
+                R
+              </button>
             </>
           )}
 
           {isSpell && canPlayNormally && onCastSpell && (
             <button
-              onClick={(e) => { e.stopPropagation(); onCastSpell(); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onCastSpell();
+              }}
               disabled={card.kind === "SLOW_SPELL" && phase !== "MAIN"}
             >
               Cast
@@ -91,13 +110,12 @@ export const HandCard: React.FC<HandCardProps> = ({
           )}
 
           {isRelic && canPlayNormally && onPlayRelic && (
-            <button onClick={(e) => { e.stopPropagation(); onPlayRelic(); }}>
-              Play
-            </button>
-          )}
-
-          {isLocation && canPlayNormally && onPlayLocation && (
-            <button onClick={(e) => { e.stopPropagation(); onPlayLocation(); }}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onPlayRelic();
+              }}
+            >
               Play
             </button>
           )}
@@ -105,9 +123,7 @@ export const HandCard: React.FC<HandCardProps> = ({
       )}
 
       {isDiscardMode && (
-        <div className="hand-card-discard-hint">
-          Click to discard
-        </div>
+        <div className="hand-card-discard-hint">Click to discard</div>
       )}
     </div>
   );
