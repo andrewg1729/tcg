@@ -42,6 +42,7 @@ export const BoardCreatureView: React.FC<BoardCreatureViewProps> = ({
   // Calculate full effective ATK including all bonuses
   const baseAtk = (card as any).atk ?? 0; // already includes relic bonus
   const tempAtkBuff = (bc as any).tempAtkBuff ?? 0;
+  const permAtkBuff = (bc as any).permAtkBuff ?? 0;
 
   // Calculate Awaken bonus
   const enemyIndex = playerIndex === 0 ? 1 : 0;
@@ -51,7 +52,7 @@ export const BoardCreatureView: React.FC<BoardCreatureViewProps> = ({
   const awakenBonus =
     hasAwaken && player.life < gameState.players[enemyIndex].life ? 1 : 0;
 
-  const displayAtk = baseAtk + tempAtkBuff + awakenBonus;
+  const displayAtk = baseAtk + permAtkBuff + tempAtkBuff + awakenBonus;
 
   return (
     <div

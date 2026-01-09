@@ -15,7 +15,8 @@ import {
   resolveRelicTargeting,
   cloneState,
   passPriority,
-  declareGuardBlock,        // ✅ NEW
+  resolveOptionalEffect,
+  declareGuardBlock,
 } from "./game/engine";
 import {
   GameState,
@@ -164,12 +165,17 @@ function handlePlayCreature(card: MainDeckCard, slotIndex: number) {
 
   // Attack declaration
   function handleAttack(mySlot: number, target: "PLAYER" | number) {
+    if ((state as any).pendingOptionalEffect) return;
     setState((prev) =>
       attack(prev, mySlot, {
         playerIndex: enemyIndex,
         slotIndex: target === "PLAYER" ? "PLAYER" : target,
       })
     );
+  }
+
+  function handleOptionalEffectChoice(accept: boolean) {
+    setState((prev) => resolveOptionalEffect(prev, accept));
   }
 
   function handlePassPriority() {
@@ -243,6 +249,7 @@ function handleCancelTarget() {
   }
 
   function handleClickPlayerAsTarget(playerIndex: number) {
+    if ((state as any).pendingOptionalEffect) return;
     if (!state.pendingTarget) return;
     setState((prev) =>
       resolveSpellTargeting(prev, undefined, { type: "PLAYER", playerIndex })
@@ -251,7 +258,9 @@ function handleCancelTarget() {
 
 // Info text (top banner)
 let infoText = "";
-if (state.pendingTarget) {
+if ((state as any).pendingOptionalEffect) {
+  infoText = (state as any).pendingOptionalEffect.prompt ?? "Activate effect?";
+} else if (state.pendingTarget) {
   infoText = `${state.pendingTarget.source} needs a target. Click a valid target.`;
 } else if (state.pendingCombat) {
   if (state.priorityPlayerIndex === activeIndex) {
@@ -262,12 +271,20 @@ if (state.pendingTarget) {
   }
 }
 
-  const validTargets = state.pendingTarget
-    ? getValidTargets(state, state.pendingTarget.rule)
+const validTargets =
+  state.pendingTarget && state.pendingTarget.rule
+    ? getValidTargets(
+        state,
+        activeIndex,
+        state.pendingTarget.rule,
+        state.pendingTarget.sourcePlayerIndex,
+        state.pendingTarget.sourceSlotIndex
+      )
     : [];
 
   // ✅ Creature click: targeting, sac, OR Guard block (if pendingCombat & you’re the defender)
   const handleCreatureClick = (playerIndex: number, slotIndex: number) => {
+    if ((state as any).pendingOptionalEffect) return;
     // 1) Guard block window: pendingCombat + no spell target + no sac + defender has priority
     const canAttemptBlock =
       state.pendingCombat &&
@@ -320,6 +337,23 @@ if (state.pendingTarget) {
       />
 
       <div className="game-main-area">
+        {(state as any).pendingOptionalEffect && (
+          <div
+            className="modal-backdrop"
+            onClick={() => handleOptionalEffectChoice(false)}
+          >
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-title">
+                {(state as any).pendingOptionalEffect.prompt ?? "Activate effect?"}
+              </div>
+              <div className="modal-actions">
+                <button onClick={() => handleOptionalEffectChoice(true)}>Yes</button>
+                <button onClick={() => handleOptionalEffectChoice(false)}>No</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <GameHeader
           state={state}
           active={active}

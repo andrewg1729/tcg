@@ -1,18 +1,20 @@
 // src/game/cardEffects.ts
 
-import { CardKind, Rank, EvolutionType } from "./types";
+import { CardKind, Rank, EvolutionType, TargetingRule } from "./types";
 
 export type EffectTiming =
-  | "ON_PLAY"           // When card enters play
-  | "ON_ATTACK"         // When creature attacks
-  | "ON_DAMAGE"         // When creature deals damage
-  | "ON_DAMAGED"        // When creature takes damage
-  | "DEATH"             // When creature dies
-  | "START_OF_TURN"     // At turn start
-  | "END_OF_TURN"       // At turn end
-  | "CATALYST"          // First spell each turn
-  | "SPELL_CAST"        // Whenever a spell is cast
-  | "IMMEDIATE";        // Spell effect
+  | "ON_PLAY"
+  | "ON_ATTACK"
+  | "ON_DAMAGE"
+  | "ON_DAMAGED"
+  | "DEATH"
+  | "START_OF_TURN"
+  | "END_OF_TURN"
+  | "CATALYST"
+  | "SPELL_CAST"
+  | "ON_EVADE"          // ✅ NEW
+  | "ON_BOUNCE"         // ✅ NEW
+  | "IMMEDIATE";
 
 export type TargetType =
   | "SELF"              // The card itself
@@ -25,12 +27,17 @@ export type TargetType =
   | "NONE";             // No target needed
 
 export type ConditionType =
-  | "LIFE_COMPARISON"      // Compare player life totals
-  | "RANK_CHECK"           // Check creature rank
-  | "DAMAGE_DEALT"         // Check if damage was dealt
-  | "CREATURE_TYPE_COUNT"  // Count creatures of a specific type
-  | "RELIC_COUNT"          // Count relics on a creature
-  | "CUSTOM";              // Custom condition logic
+  | "LIFE_COMPARISON"
+  | "RANK_CHECK"
+  | "DAMAGE_DEALT"
+  | "CREATURE_TYPE_COUNT"
+  | "RELIC_COUNT"
+  | "SELF_HAS_EVADED_THIS_DUEL"        // ✅ NEW
+  | "ANY_FRIENDLY_EVADED_THIS_TURN"    // ✅ NEW
+  | "ANY_FRIENDLY_BOUNCED_THIS_TURN"   // ✅ NEW
+  | "ENEMY_ATTACK_MISSED_THIS_TURN"    // ✅ NEW
+  | "CUSTOM";
+
 
 export interface EffectCondition {
   type: ConditionType;
@@ -48,40 +55,70 @@ export interface ConditionalValue {
   condition: EffectCondition;
 }
 
+// src/game/cardEffects.ts
+
+export interface PeekHandSpec {
+  target: "OPPONENT" | "PLAYER";     // default OPPONENT
+  revealCount?: number;              // default ALL
+}
+
+export type ChoiceOption = {
+  label: string;
+  effects: CardEffect[];
+};
+
 export interface CardEffect {
   timing: EffectTiming;
   targetType: TargetType;
+  targetingRule?: TargetingRule;
+  optional?: boolean;
+
+  // ✅ scalable conditions (already present)
   conditions?: EffectCondition[];
-  
-  // Effect actions
+
+  // ✅ engine is already using these (make them real)
+  oncePerTurn?: boolean;
+
+  // used by ON_EVADE / ON_BOUNCE trigger scanners in engine.ts
+  condition?: any; // (optional legacy single-condition form; keep if you already shipped it)
+  requiresFriendlyEvade?: boolean;
+  requiresFriendlyBounce?: boolean;
+
+  // ✅ generic “don’t re-apply this forever once condition stays true”
+  triggerOncePerCondition?: boolean;
+
+  // numbers
   damage?: number;
   heal?: number;
   draw?: number;
   discard?: number;
   atkBuff?: number;
+
+  // durations (expandable)
   buffDuration?: "TURN" | "PERMANENT";
-  destroy?: boolean;
+
+  // keywords / statuses
   stun?: number;
   shield?: number;
+  evasion?: boolean;
+  bounce?: boolean;
+  destroy?: boolean;
+  summonTokenCardId?: string; // e.g. "NJ-TOKEN-001"
+  summonTo?: "BOUNCED_SLOT";  // extend later if needed
   
-  // Conditional effects (for cards like "deal 2 damage, or 3 if...")
-  conditionalDamage?: ConditionalValue;
-  conditionalHeal?: ConditionalValue;
-  conditionalDraw?: ConditionalValue;
-  
-  // Custom script for complex effects
-  // Examples:
-  // - "TRIGGER_CATALYST" - Trigger Catalyst effects again
-  // - "COPY_RELIC_KEYWORDS" - Copy keywords from relics
-  // - "SEARCH_DECK_TO_TOP_RUNEBLADE_RELIC" - Search for specific card
-  // - "RESURRECT_NAMED_TO_HAND_RUNEBLADE" - Return named card from graveyard
-  // - "HEAL_IF_KILL" - Heal if target dies
-  // - "ATK_BUFF_ON_KILL" - Gain ATK when killing creatures
-  // - "RANDOM_FRIENDLY" - Target random friendly creature
-  // - "ENEMY_ONLY" - Can only target enemies
-  // - "FRIENDLY_ONLY" - Can only target friendlies
-  // - "EXCLUDE_SELF" - Cannot target self
+  // ✅ NEW first-class action
+  peekHand?: PeekHandSpec;
+
+  // keep for truly niche / UI multi-step
   customScript?: string;
+  
+  // NEW: generic choices
+  choice?: {
+    options: ChoiceOption[];
+  };
+
+  // NEW: target the trigger subject (evader/bounced creature)
+  targetTriggeringCreature?: boolean;
 }
 
 export interface KeywordEffect {

@@ -3,6 +3,7 @@
 // -----------------------------
 // Basic shared types
 // -----------------------------
+import type { EvolutionCondition } from "./evolutionConditions";
 
 export type CardId = string;
 
@@ -42,6 +43,7 @@ export interface CreatureCard extends BaseCard {
 
 export interface SpellCard extends BaseCard {
   kind: "FAST_SPELL" | "SLOW_SPELL";
+    tier: number; // ✅ NEW
 }
 
 // --- Relics ---
@@ -60,11 +62,16 @@ export interface LocationCard extends BaseCard {
 
 export interface EvolutionCard extends BaseCard {
   kind: "EVOLUTION";
-  baseName: string;   // name of the base creature this can evolve from
-  requiredTier: number; // rank of the base creature
+  baseName: string;
+  requiredTier: number;
+  tier: number;
   atk: number;
   hp: number;
+  type?: string;
+
+  conditions?: EvolutionCondition[];
 }
+
 
 // Main deck = everything except evolutions
 export type MainDeckCard =
@@ -116,6 +123,19 @@ export interface PlayerState {
 
   // how many spells this player has cast during the current turn
   spellsCastThisTurn: number;
+
+  // NEW: Loot counter system
+  loot?: number;
+  lootGainedThisTurn?: number;
+  lootSpentThisTurn?: number;
+  
+  // NEW: tracking sets for triggers (reset each turn)
+  evadedThisTurn?: Set<number>;
+  bouncedThisTurn?: Set<number>;
+  enemyAttackMissedThisTurn?: boolean;
+
+  // optional: once-per-turn trigger gating
+  triggerUsedThisTurn?: Set<string>;
 }
 
 // -----------------------------
@@ -123,12 +143,13 @@ export interface PlayerState {
 // -----------------------------
 
 export type TargetingRule =
-  | { type: "ENEMY_CREATURES" }
-  | { type: "FRIENDLY_CREATURES" }
-  | { type: "ALL_CREATURES" }
-  | { type: "ENEMY_PLAYER" }
+  | { type: "ANY_CREATURE"; minTier?: number; maxTier?: number }
+  | { type: "FRIENDLY_CREATURES"; excludeSelf?: boolean; minTier?: number; maxTier?: number }
+  | { type: "ENEMY_CREATURES"; excludeSelf?: boolean; minTier?: number; maxTier?: number }
+  | { type: "ALL_CREATURES"; excludeSelf?: boolean; minTier?: number; maxTier?: number }
   | { type: "ANY_PLAYER" }
-  | { type: "SACRIFICE"; requiredHp: number };
+  | { type: "SELF_PLAYER" }
+  | { type: "ENEMY_PLAYER" };
 
 // Spell / effect targeting as used by the engine + effectExecutor
 export type SpellTarget =
@@ -143,6 +164,26 @@ export interface PendingTarget {
   sourceSlotIndex?: number;
   sourceCardId?: string;
   sourceType: "ON_PLAY" | "SPELL" | "RELIC";
+
+  /**
+   * If true, the player may decline to select a target (effect does nothing).
+   * (UI/controls may implement this as a cancel/skip action.)
+   */
+  optional?: boolean;
+
+  /**
+   * If present, only these effects will be executed after targeting resolves.
+   * (Prevents accidentally executing "all ON_PLAY effects" when we only meant one.)
+   */
+  effects?: any[];
+}
+
+export interface PendingOptionalEffect {
+  prompt: string;               // "Activate Neonja Callback effect?"
+  source: string;               // card name (for logs / lookups)
+  sourcePlayerIndex: number;    // owner of the source card
+  sourceSlotIndex: number;      // slot of the source card
+  effect: any;                  // the CardEffect being offered
 }
 
 // -----------------------------
@@ -193,6 +234,26 @@ export interface PendingCombat {
     blockerSlotIndex?: number; // NEW: defending Guard creature that blocks, if any
 }
 
+export interface PendingHandReveal {
+  viewerPlayerIndex: number;      // who gets to see
+  revealedPlayerIndex: number;    // whose hand was revealed
+  cardIds: string[];              // stable IDs for UI
+  cardNames: string[];            // fallback/simple UI
+  until?: "END_OF_TURN" | "ACK";  // optional (you can keep it simple now)
+}
+
+export type TriggeringTarget =
+  | { type: "CREATURE"; playerIndex: number; slotIndex: number }
+  | { type: "NONE" };
+
+  export type PendingChoice = {
+  playerIndex: number;          // who must choose
+  sourcePlayerIndex: number;    // owner of card that created the choice
+  sourceSlotIndex?: number;     // where that card is (if creature)
+  prompt: string;
+  options: { label: string; effects: any[] }[];
+};
+
 export interface GameState {
   players: PlayerState[];
   activePlayerIndex: number;
@@ -203,6 +264,10 @@ export interface GameState {
   pendingDiscard?: PendingDiscard | null;
   pendingSacrificeSummon?: PendingSacrificeSummon | null;
   pendingTarget?: PendingTarget;
+  pendingOptionalEffect?: PendingOptionalEffect | null;
+  pendingHandReveal?: PendingHandReveal | null;
+  triggeringTarget?: TriggeringTarget; // set during triggers like ON_EVADE / ON_BOUNCE
+  pendingChoice?: PendingChoice;
 
   stack: StackItem[];
   priorityPlayerIndex: number;

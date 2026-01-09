@@ -36,6 +36,21 @@ const KEYWORD_TOOLTIPS: Record<string, string> = {
   THORNS: "When this creature takes damage from an attack, deal X damage back to the attacker.",
 };
 
+// Evolution condition explanations (used in CardPreview for EVOLUTION cards)
+const EVOLUTION_CONDITION_LABELS: Record<string, string> = {
+  SELF_HAS_EVADED_THIS_DUEL: "This creature has evaded battle damage this duel.",
+  YOU_RETURNED_A_CREATURE_TO_HAND_THIS_TURN: "You returned a creature you control to your hand this turn.",
+  A_FRIENDLY_CREATURE_EVADED_THIS_TURN: "A creature you control evaded battle damage this turn.",
+  TWO_OR_MORE_FRIENDLY_CREATURES_EVADED_THIS_DUEL:
+    "Two or more creatures you control on the field have evaded battle damage this duel.",
+};
+
+function formatEvolutionCondition(cond: any): string {
+  if (!cond) return "—";
+  const t = typeof cond.type === "string" ? cond.type : "";
+  return EVOLUTION_CONDITION_LABELS[t] ?? t ?? "—";
+}
+
 export const CardPreview: React.FC<CardPreviewProps> = ({ 
   card, 
   playerState, 
@@ -144,7 +159,8 @@ export const CardPreview: React.FC<CardPreviewProps> = ({
     awaken: awakenBonus
   };
   
-  displayAtk = ((actualCard as any).atk || 0) + relicAtkBonus + baseTempBuff + awakenBonus;
+const permAtkBuff = (boardCreature as any).permAtkBuff || 0;
+displayAtk = ((actualCard as any).atk || 0) + relicAtkBonus + permAtkBuff + baseTempBuff + awakenBonus;
   relicCount = playerState.relics.filter(r => r.slotIndex === slotIndex).length;
 }
 
@@ -255,17 +271,58 @@ export const CardPreview: React.FC<CardPreviewProps> = ({
           )}
         </div>
 
-        {/* Card Name & Type */}
-        <div className="card-preview-header">
-          <h3 className="card-preview-name">{actualCard.name}</h3>
-          <div className="card-preview-type">
-{actualCard.kind === "CREATURE" && `Tier ${(actualCard as CreatureCard).tier} Creature`}
-            {actualCard.kind === "EVOLUTION" && "Evolution"}
-            {actualCard.kind === "FAST_SPELL" && "Fast Spell"}
-            {actualCard.kind === "SLOW_SPELL" && "Slow Spell"}
-            {actualCard.kind === "RELIC" && "Relic"}
-          </div>
-        </div>
+{/* Card Name & Type */}
+<div className="card-preview-header">
+  <h3 className="card-preview-name">{actualCard.name}</h3>
+
+<div className="card-preview-type">
+  {actualCard.kind === "CREATURE" && `Tier ${(actualCard as CreatureCard).tier} Creature`}
+
+  {actualCard.kind === "EVOLUTION" &&
+    ((actualCard as any).tier != null
+      ? `Tier ${(actualCard as any).tier} Evolution`
+      : "Evolution")}
+
+  {(actualCard.kind === "FAST_SPELL" || actualCard.kind === "SLOW_SPELL") &&
+    `Tier ${((actualCard as any).tier ?? 1)} ${actualCard.kind === "FAST_SPELL" ? "Fast Spell" : "Slow Spell"}`}
+
+  {actualCard.kind === "RELIC" && "Relic"}
+  {actualCard.kind === "LOCATION" && "Location"}
+</div>
+
+  {/* Evolution metadata */}
+  {actualCard.kind === "EVOLUTION" && (
+    <div className="card-preview-evolution-meta">
+      <div className="card-preview-evolution-line">
+        <span className="stat-label">Evolves from:</span>{" "}
+        <span className="stat-value">
+          {(actualCard as any).baseName ?? "—"}
+          {typeof (actualCard as any).requiredTier === "number"
+            ? ` (base tier ≥ ${(actualCard as any).requiredTier})`
+            : ""}
+        </span>
+      </div>
+
+      <div className="card-preview-evolution-line">
+        <span className="stat-label">
+          {Array.isArray((actualCard as any).conditions) && (actualCard as any).conditions.length > 1
+            ? "Conditions:"
+            : "Condition:"}
+        </span>
+
+        {Array.isArray((actualCard as any).conditions) && (actualCard as any).conditions.length > 0 ? (
+          <ul className="card-preview-evolution-conditions">
+            {(actualCard as any).conditions.map((c: any, i: number) => (
+              <li key={i}>{formatEvolutionCondition(c)}</li>
+            ))}
+          </ul>
+        ) : (
+          <span className="stat-value">—</span>
+        )}
+      </div>
+    </div>
+  )}
+</div>
 
         {/* Stats (for creatures) */}
         {isCreature && (

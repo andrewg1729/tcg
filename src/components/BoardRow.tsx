@@ -10,6 +10,16 @@ import { BoardCreatureView } from "./BoardCreatureView";
 
 const slotLabels = ["Left", "Center", "Right"];
 
+function getSleevePathFromCards(cards: Array<{ imagePath?: string }>): string | null {
+  const sample = cards.find((c) => !!c.imagePath)?.imagePath;
+  if (!sample) return null;
+
+  const lastSlash = sample.lastIndexOf("/");
+  if (lastSlash === -1) return null;
+
+  return `${sample.slice(0, lastSlash + 1)}Sleeve.png`;
+}
+
 interface BoardRowProps {
   label: string;
   playerIndex: number;
@@ -40,6 +50,8 @@ export const BoardRow: React.FC<BoardRowProps> = ({
   onMouseEnterEvolution,
 }) => {
   const player = state.players[playerIndex];
+const deckSleeve = getSleevePathFromCards(player.deck);
+const evoSleeve = getSleevePathFromCards(player.evolutionDeck);
 
   return (
     <div className="board-row-container">
@@ -58,16 +70,15 @@ export const BoardRow: React.FC<BoardRowProps> = ({
           >
             <div className="board-slot-label">Evolutions</div>
             <div className="zone-slot-content">
-              {player.evolutionDeck.length > 0 &&
-              player.evolutionDeck[0].imagePath ? (
-                <img
-                  src={player.evolutionDeck[0].imagePath}
-                  alt="Evolution Deck"
-                  className="zone-slot-image"
-                />
-              ) : (
-                <div className="zone-slot-placeholder">⭐</div>
-              )}
+{evoSleeve ? (
+  <img
+    src={evoSleeve}
+    alt="Evolution Deck Sleeve"
+    className="zone-slot-image"
+  />
+) : (
+  <div className="zone-slot-placeholder">⭐</div>
+)}
               <div className="zone-slot-count">
                 {player.evolutionDeck.length}
               </div>
@@ -116,7 +127,15 @@ export const BoardRow: React.FC<BoardRowProps> = ({
           <div className="board-zone-slot deck-zone">
             <div className="board-slot-label">Deck</div>
             <div className="zone-slot-content">
-              <div className="zone-slot-placeholder">🎴</div>
+{deckSleeve ? (
+  <img
+    src={deckSleeve}
+    alt="Deck Sleeve"
+    className="zone-slot-image"
+  />
+) : (
+  <div className="zone-slot-placeholder">🎴</div>
+)}
               <div className="zone-slot-count">{player.deck.length}</div>
             </div>
           </div>

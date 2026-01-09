@@ -1,8 +1,8 @@
 // src/game/effectExecutor.ts
 
-import { GameState, PlayerState, BoardCreature } from "./types";
+import { GameState, PlayerState, BoardCreature, SpellTarget } from "./types";
 import { CardEffect, TargetType } from "./cardEffects";
-import { SpellTarget, getLocationModifiers  } from "./engine";
+import { getLocationModifiers, bounceCreatureToHand, summonTokenIntoSlot } from "./engine";
 
 export class EffectExecutor {
   executeEffect(
@@ -17,6 +17,21 @@ export class EffectExecutor {
       target,
       timing: effect.timing
     });
+
+    // If this effect is a choice, pause execution and wait for UI selection
+if ((effect as any).choice?.options?.length) {
+  const opts = (effect as any).choice.options;
+
+  gs.pendingChoice = {
+    playerIndex: sourcePlayerIndex,
+    sourcePlayerIndex,
+    sourceSlotIndex: target?.type === "CREATURE" ? target.slotIndex : undefined,
+    prompt: "Choose one:",
+    options: opts.map((o: any) => ({ label: o.label, effects: o.effects })),
+  };
+
+  return;
+}
     
     switch (effect.timing) {
       case "IMMEDIATE":
@@ -46,6 +61,12 @@ export class EffectExecutor {
       case "CATALYST":
         this.executeCatalystEffect(gs, effect, sourcePlayerIndex);
         break;
+        case "ON_EVADE":
+  this.executeImmediateEffect(gs, effect, sourcePlayerIndex, target);
+  break;
+case "ON_BOUNCE":
+  this.executeImmediateEffect(gs, effect, sourcePlayerIndex, target);
+  break;
     }
   }
   
@@ -58,6 +79,30 @@ private executeImmediateEffect(
 ): void {
   const player = gs.players[playerIndex];
   const enemy = gs.players[1 - playerIndex];
+
+    if (effect.conditions && effect.conditions.length > 0) {
+    const ok = this.areConditionsMet(gs, playerIndex, target, effect.conditions);
+    if (!ok) return;
+  }
+
+    // ✅ generic: only trigger once when conditions become true
+  if (effect.triggerOncePerCondition && effect.conditions?.length) {
+    const gateTarget =
+      (target?.type === "CREATURE")
+        ? gs.players[target.playerIndex].board[target.slotIndex]
+        : (effect.targetType === "SELF" && target?.type === "CREATURE"
+            ? gs.players[target.playerIndex].board[target.slotIndex]
+            : null);
+
+    if (gateTarget) {
+      const anyGate = gateTarget as any;
+      if (!anyGate.triggeredConditionKeys) anyGate.triggeredConditionKeys = new Set<string>();
+
+      const key = JSON.stringify(effect.conditions);
+      if (anyGate.triggeredConditionKeys.has(key)) return;
+      anyGate.triggeredConditionKeys.add(key);
+    }
+  }
   
   // EVALUATE CONDITIONAL VALUES FIRST
   if (effect.conditionalDamage) {
@@ -157,6 +202,15 @@ if (effect.heal !== undefined) {
     this.healPlayer(gs, playerIndex, effect.heal, true);
   }
 }
+
+    // ✅ Generic token summon support (used by Makibishi)
+    if ((effect as any).summonTokenCardId && (effect as any).summonTo === "BOUNCED_SLOT") {
+      const ctx = (gs as any).lastBounceContext;
+      if (ctx && typeof ctx.bouncedOwnerIndex === "number" && typeof ctx.bouncedSlotIndex === "number") {
+        summonTokenIntoSlot(gs, ctx.bouncedOwnerIndex, ctx.bouncedSlotIndex, (effect as any).summonTokenCardId);
+      }
+      return;
+    }
     
     // Handle draw
     if (effect.draw !== undefined && effect.draw > 0) {
@@ -174,22 +228,54 @@ if (effect.heal !== undefined) {
       };
     }
     
-    // Handle ATK buff
     if (effect.atkBuff !== undefined) {
+      const applyBuff = (bc: any) => {
+        if (effect.buffDuration === "PERMANENT") {
+          bc.permAtkBuff = (bc.permAtkBuff || 0) + effect.atkBuff!;
+        } else {
+          bc.tempAtkBuff = (bc.tempAtkBuff || 0) + effect.atkBuff!;
+        }
+      };
+
       if (effect.targetType === "ALL_FRIENDLY") {
         player.board.forEach(bc => {
-          if (bc) {
-            (bc as any).tempAtkBuff = ((bc as any).tempAtkBuff || 0) + effect.atkBuff!;
-          }
+          if (bc) applyBuff(bc as any);
         });
-        gs.log.push(`All your creatures gain +${effect.atkBuff} ATK this turn.`);
+        gs.log.push(`All your creatures gain +${effect.atkBuff} ATK ${effect.buffDuration === "PERMANENT" ? "permanently" : "this turn"}.`);
       } else if (target?.type === "CREATURE") {
         const bc = gs.players[target.playerIndex].board[target.slotIndex];
         if (bc) {
-          (bc as any).tempAtkBuff = ((bc as any).tempAtkBuff || 0) + effect.atkBuff!;
-          gs.log.push(`${bc.card.name} gains +${effect.atkBuff} ATK this turn.`);
+          applyBuff(bc as any);
+          gs.log.push(`${bc.card.name} gains +${effect.atkBuff} ATK ${effect.buffDuration === "PERMANENT" ? "permanently" : "this turn"}.`);
         }
       }
+    }
+
+    // ✅ Handle bounce (return creature to owner's hand)
+if (effect.bounce && target?.type === "CREATURE") {
+  bounceCreatureToHand(gs, target.playerIndex, target.slotIndex, playerIndex);
+}
+
+    if (effect.peekHand) {
+      const spec = effect.peekHand;
+      const revealedPlayerIndex =
+        spec.target === "PLAYER"
+          ? (target?.type === "PLAYER" ? target.playerIndex : (1 - playerIndex))
+          : (1 - playerIndex);
+
+      const revealed = gs.players[revealedPlayerIndex];
+      const revealCount = spec.revealCount ?? revealed.hand.length;
+
+      const slice = revealed.hand.slice(0, revealCount);
+      gs.pendingHandReveal = {
+        viewerPlayerIndex: playerIndex,
+        revealedPlayerIndex,
+        cardIds: slice.map(c => c.id),
+        cardNames: slice.map(c => c.name),
+        until: "END_OF_TURN",
+      };
+
+      gs.log.push(`${gs.players[playerIndex].name} looks at ${revealed.name}'s hand.`);
     }
     
 // Handle stun
@@ -209,6 +295,15 @@ if (effect.stun !== undefined && target?.type === "CREATURE") {
         gs.log.push(`${bc.card.name} gains a shield preventing ${effect.shield} damage.`);
       }
     }
+
+    // ✅ Handle evasion grant (temp evade this turn)
+if (effect.evasion && target?.type === "CREATURE") {
+  const bc = gs.players[target.playerIndex].board[target.slotIndex];
+  if (bc) {
+    (bc as any).tempEvadeThisTurn = true;
+    gs.log.push(`${bc.card.name} will evade the next battle damage this turn.`);
+  }
+}
     
     // Handle destroy
     if (effect.destroy && target?.type === "CREATURE") {
@@ -269,7 +364,12 @@ private executeOnPlayEffect(
       );
     }
   }
-  
+
+    // ✅ Handle bounce for ON_PLAY effects (return creature to owner's hand)
+  if (effect.bounce && target?.type === "CREATURE") {
+    bounceCreatureToHand(gs, target.playerIndex, target.slotIndex, playerIndex);
+  }
+
   // Handle healing for ON_PLAY effects
   if (effect.heal !== undefined && target?.type === "CREATURE") {
     this.healCreature(gs, target.playerIndex, target.slotIndex, effect.heal, false);
@@ -315,6 +415,63 @@ private executeOnAttackEffect(
     gs.log.push(`${player.name} draws ${effect.draw} card(s).`);
   }
 }
+
+private areConditionsMet(
+  gs: GameState,
+  sourcePlayerIndex: number,
+  target: SpellTarget | undefined,
+  conditions: any[]
+): boolean {
+  const player = gs.players[sourcePlayerIndex] as any;
+
+  for (const cond of conditions) {
+    switch (cond.type) {
+      case "SELF_HAS_EVADED_THIS_DUEL": {
+        // expects target to be SELF creature OR an explicit creature target
+        if (target?.type !== "CREATURE") return false;
+        const bc = gs.players[target.playerIndex].board[target.slotIndex];
+        if (!bc) return false;
+        return !!(bc as any).hasEvadedThisDuel;
+      }
+
+      case "ANY_FRIENDLY_EVADED_THIS_TURN": {
+        return !!player.evadedThisTurn && player.evadedThisTurn.size > 0;
+      }
+
+      case "ANY_FRIENDLY_BOUNCED_THIS_TURN": {
+        return !!player.bouncedThisTurn && player.bouncedThisTurn.size > 0;
+      }
+
+      case "ENEMY_ATTACK_MISSED_THIS_TURN": {
+        return !!player.enemyAttackMissedThisTurn;
+      }
+
+      // keep your existing ones too (if you later want to reuse them here)
+      case "CREATURE_TYPE_COUNT": {
+        if (!cond.creatureType || !cond.minCount) return false;
+        const count = gs.players[sourcePlayerIndex].board.filter((bc: any) =>
+          bc && (bc.card as any).type?.toLowerCase() === cond.creatureType.toLowerCase()
+        ).length;
+        return count >= cond.minCount;
+      }
+
+      case "RELIC_COUNT": {
+        if (!cond.relicTag || !cond.minCount) return false;
+        const count = gs.players[sourcePlayerIndex].relics.filter((r: any) =>
+          r.relic.name.toLowerCase().includes(cond.relicTag.toLowerCase())
+        ).length;
+        return count >= cond.minCount;
+      }
+
+      default:
+        // unknown conditions default to false (safer)
+        return false;
+    }
+  }
+
+  return true;
+}
+
   
 private executeDeathEffect(
   gs: GameState,
